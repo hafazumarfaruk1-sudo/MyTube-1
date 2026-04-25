@@ -62,18 +62,19 @@ export default function GlobalPlayer() {
 
       if (json.success && json.url) {
           setStreamMode(json.streamType || 'combined');
+          // [FIX]: সাথে সাথে ভিডিও URL সেট করা হলো, যাতে ভিডিও বাফারিং শুরু করে দেয়
           setStreamUrl(json.url);
 
           if (json.streamType === 'separate' && json.audioUrl) {
-              try {
-                  await syncAudioRef.current.unloadAsync();
-                  await syncAudioRef.current.loadAsync(
+              // [FIX]: await সরিয়ে দেওয়া হয়েছে যাতে অডিও লোডিং ভিডিওকে আটকে না রাখে (৩ সেকেন্ড ফিক্স)
+              syncAudioRef.current.unloadAsync().then(() => {
+                  syncAudioRef.current.loadAsync(
                       { uri: json.audioUrl },
                       { shouldPlay: true, positionMillis: seekPosRef.current }
-                  );
-              } catch(e) {}
+                  ).catch(() => {});
+              }).catch(() => {});
           } else {
-              try { await syncAudioRef.current.unloadAsync(); } catch(e){}
+              syncAudioRef.current.unloadAsync().catch(() => {});
           }
           setIsPlaying(true);
           setErrorMsg(null);
@@ -92,19 +93,16 @@ export default function GlobalPlayer() {
         try { await videoRef.current.setPositionAsync(pos); } catch(e){}
     }
 
-    // [AUDIO BACKGROUND LOGIC]: Separate মোডে ভিডিও পজ থাকলে শুধু অডিও চলবে
     if (streamMode === 'separate' && status.isLoaded) {
         try {
             const audioStatus = await syncAudioRef.current.getStatusAsync();
             if (!audioStatus.isLoaded) return;
 
             if (isAudioMode) {
-                // অডিও মোডে ভিডিও পজ থাকবে, শুধু অডিও চলবে
                 if (audioStatus.isPlaying !== isPlaying) {
                     isPlaying ? await syncAudioRef.current.playAsync() : await syncAudioRef.current.pauseAsync();
                 }
             } else {
-                // ভিডিও মোডে অডিও সিঙ্ক হবে
                 if (status.isPlaying && !audioStatus.isPlaying) {
                     await syncAudioRef.current.playAsync();
                 } else if (!status.isPlaying && audioStatus.isPlaying) {
@@ -149,14 +147,9 @@ export default function GlobalPlayer() {
     const toggleAudioSub = DeviceEventEmitter.addListener('toggleAudioMode', async (mode) => {
         setIsAudioMode(mode);
         await setBackgroundAudio(mode);
-        
         if (mode) {
-            // অডিও মোড চালু হলে
-            if (streamMode === 'separate' && videoRef.current) {
-                await videoRef.current.pauseAsync(); // ভিডিও অফ, শুধু অডিও চলবে
-            }
+            if (streamMode === 'separate' && videoRef.current) await videoRef.current.pauseAsync();
         } else {
-            // ভিডিও মোডে ফিরলে
             if (streamMode === 'separate' && videoRef.current) {
                 const aStatus = await syncAudioRef.current.getStatusAsync();
                 await videoRef.current.setPositionAsync(aStatus.positionMillis || 0);
@@ -177,7 +170,11 @@ export default function GlobalPlayer() {
            try { await syncAudioRef.current.unloadAsync(); } catch(e){}
            await fetchStreamUrl(currentVideoIdRef.current, newQuality);
         }
-     });
+    });
+
+    // [FIX]: মিনিমাইজ এবং ম্যাক্সিমাইজ লিসেনারগুলো ফিরিয়ে আনা হয়েছে (থ্রিডি মিনি প্লেয়ারের জন্য)
+    const minSub = DeviceEventEmitter.addListener('minimizeVideo', () => setPlayerState('mini'));
+    const maxSub = DeviceEventEmitter.addListener('maximizeVideo', () => { if (videoData) setPlayerState('full'); });
 
     const stopSub = DeviceEventEmitter.addListener('stopVideo', async () => {
       await setBackgroundAudio(false); 
@@ -187,7 +184,8 @@ export default function GlobalPlayer() {
       setStreamUrl(null);
     });
 
-    return () => { playSub.remove(); toggleAudioSub.remove(); qualitySub.remove(); stopSub.remove(); };
+    // [FIX]: ক্লিনআপ ফাংশনে minSub এবং maxSub যুক্ত করা হয়েছে
+    return () => { playSub.remove(); toggleAudioSub.remove(); qualitySub.remove(); stopSub.remove(); minSub.remove(); maxSub.remove(); };
   }, [videoData, streamMode, isAudioMode, isPlaying]);
 
   const panResponder = useRef(PanResponder.create({
@@ -243,6 +241,7 @@ export default function GlobalPlayer() {
                   </View>
                )}
 
+               {/* [RESTORED]: থ্রিডি মিনি প্লেয়ারের পজ এবং ক্লোজ বাটন */}
                {!isFull && (
                   <View style={styles.overlay}>
                      <TouchableOpacity style={styles.miniPlayBtn} onPress={async () => {
@@ -271,7 +270,8 @@ export default function GlobalPlayer() {
 
 const styles = StyleSheet.create({
   fullContainer: { position: 'absolute', top: 55, left: 0, width: width, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000' },
-  miniContainer: { position: 'absolute', bottom: 80, right: 15, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', zIndex: 9999, borderRadius: 12, overflow: 'hidden', elevation: 10 },
+  // [FIX]: elevation: 15 এবং শ্যাডো দিয়ে থ্রিডি আকার পুনরায় ফিরিয়ে আনা হয়েছে
+  miniContainer: { position: 'absolute', bottom: 80, right: 15, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', zIndex: 9999, borderRadius: 12, overflow: 'hidden', elevation: 15, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 5 },
   touchable: { flex: 1 },
   fullVideoWrapper: { flex: 1, backgroundColor: '#000' },
   miniVideoWrapper: { flex: 1, backgroundColor: '#111', position: 'relative' },
