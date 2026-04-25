@@ -25,11 +25,11 @@ export default function GlobalPlayer() {
 
   const currentVideoIdRef = useRef(null);
   const isLocalRef = useRef(false);
+  const seekPosRef = useRef(0);
 
   const [playerState, setPlayerState] = useState('hidden'); 
   const [videoData, setVideoData] = useState(null);
   const [streamUrl, setStreamUrl] = useState(null);
-
   const [isPlaying, setIsPlaying] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
   const [isAudioMode, setIsAudioMode] = useState(false);
@@ -61,7 +61,7 @@ export default function GlobalPlayer() {
           setIsPlaying(true);
           setErrorMsg(null);
       } else {
-          setErrorMsg("এই ভিডিওটি প্লে করা যাচ্ছে না।");
+          setErrorMsg("ভিডিওটি লোড করা যাচ্ছে না।");
       }
     } catch(e) { 
       setErrorMsg("সার্ভার কানেকশন এরর!");
@@ -69,22 +69,17 @@ export default function GlobalPlayer() {
   };
 
   useEffect(() => {
+    // ১. ভিডিও প্লে করার লিসেনার
     const playSub = DeviceEventEmitter.addListener('playVideo', async (data) => {
       const isAudio = data.videoData?.type === 'audio';
-
       if (videoData?.id === data.videoId) {
         setPlayerState('full');
-        setIsAudioMode(isAudio);
-        await setBackgroundAudio(isAudio);
         return; 
       }
-
       setIsAudioMode(isAudio);
       await setBackgroundAudio(isAudio); 
-
       currentVideoIdRef.current = data.videoId;
       isLocalRef.current = !!(data.videoData && data.videoData.localUri);
-
       setVideoData(data.videoData);
       setPlayerState('full');
       setStreamUrl(null);
@@ -97,22 +92,44 @@ export default function GlobalPlayer() {
           setStreamUrl(data.videoData.localUri);
           return;
       }
-
       const targetQuality = global.appSettings?.normalVideo || '720p';
       await fetchStreamUrl(data.videoId, targetQuality);
     });
 
-    const stopSub = DeviceEventEmitter.addListener('stopVideo', async () => {
-      await setBackgroundAudio(false); 
-      if (videoRef.current) { try { await videoRef.current.pauseAsync(); } catch(e){} }
-      setPlayerState('hidden');
-      setStreamUrl(null);
-      setIsPlaying(false);
+    // ২. কোয়ালিটি পরিবর্তন লিসেনার (সেটিংস থেকে কাজ করবে)
+    const qualitySub = DeviceEventEmitter.addListener('qualityChanged', async (newQuality) => {
+       if (currentVideoIdRef.current && !isLocalRef.current) {
+          let currentPos = 0;
+          if (videoRef.current) {
+              const status = await videoRef.current.getStatusAsync();
+              currentPos = status.positionMillis || 0;
+          }
+          seekPosRef.current = currentPos;
+          setStreamUrl(null);
+          setVideoKey(Date.now().toString());
+          await fetchStreamUrl(currentVideoIdRef.current, newQuality);
+       }
     });
 
-    return () => { playSub.remove(); stopSub.remove(); };
+    const minSub = DeviceEventEmitter.addListener('minimizeVideo', () => setPlayerState('mini'));
+    const maxSub = DeviceEventEmitter.addListener('maximizeVideo', () => { if (videoData) setPlayerState('full'); });
+
+    const stopSub = DeviceEventEmitter.addListener('stopVideo', async () => {
+      await setBackgroundAudio(false); 
+      setPlayerState('hidden');
+      setStreamUrl(null);
+    });
+
+    return () => { 
+        playSub.remove(); 
+        qualitySub.remove(); 
+        minSub.remove(); 
+        maxSub.remove(); 
+        stopSub.remove(); 
+    };
   }, [videoData]);
 
+  // প্যান রেসপন্ডার (মিনি প্লেয়ার ড্র্যাগ করার জন্য)
   const panResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 3 || Math.abs(g.dy) > 3,
@@ -136,7 +153,11 @@ export default function GlobalPlayer() {
         style={[isFull ? styles.fullContainer : [styles.miniContainer, { transform: [{ translateX: pan.x }, { translateY: pan.y }] }]]} 
         {...(isFull ? {} : panResponder.panHandlers)}
      >
-        <TouchableOpacity activeOpacity={0.9} style={styles.touchable} onPress={() => { if (!isFull && videoData) navigation.navigate('Player', { videoId: videoData.id, videoData }); }}>
+        <TouchableOpacity 
+            activeOpacity={0.9} 
+            style={styles.touchable} 
+            onPress={() => { if (!isFull && videoData) navigation.navigate('Player', { videoId: videoData.id, videoData }); }}
+        >
            <View style={isFull ? styles.fullVideoWrapper : styles.miniVideoWrapper}>
 
                {errorMsg ? (
@@ -145,32 +166,31 @@ export default function GlobalPlayer() {
                       <Text style={{color: '#FF4444', marginTop: 10, fontSize: isFull ? 16 : 12, textAlign: 'center'}}>{errorMsg}</Text>
                   </View>
                ) : streamUrl ? (
-                  <View style={styles.videoCoreWrapper}>
-                    <Video 
-                      key={videoKey} 
-                      ref={videoRef} 
-                      source={{ uri: streamUrl }} 
-                      style={styles.video} 
-                      shouldPlay={isPlaying} 
-                      useNativeControls={isFull && (!isAudioMode || isLocalRef.current)} 
-                      resizeMode={isFull ? "contain" : "cover"} 
-                    />
-                  </View>
+                  <Video 
+                    key={videoKey} 
+                    ref={videoRef} 
+                    source={{ uri: streamUrl }} 
+                    style={styles.video} 
+                    shouldPlay={isPlaying} 
+                    positionMillis={seekPosRef.current}
+                    onLoad={() => { seekPosRef.current = 0; }}
+                    useNativeControls={isFull} 
+                    resizeMode={isFull ? "contain" : "cover"} 
+                  />
                ) : (
                   <View style={styles.loadingBox}><ActivityIndicator size={isFull ? "large" : "small"} color="#FF0000" /></View>
                )}
 
                {showCustomPoster && (
                   <View style={styles.audioPosterContainer}>
-                    <Image source={{ uri: videoData?.thumbnail }} style={styles.audioPosterBg} blurRadius={isFull ? 15 : 5} />
+                    <Image source={{ uri: videoData?.thumbnail }} style={styles.audioPosterBg} blurRadius={15} />
                     <View style={styles.audioPosterOverlay}>
-                      <View style={[styles.audioIconCircle, !isFull && { width: 40, height: 40, borderRadius: 20 }]}>
                         <Ionicons name="musical-notes" size={isFull ? 50 : 20} color="#FFF" />
-                      </View>
                     </View>
                   </View>
                )}
 
+               {/* মিনি প্লেয়ারের বাটন (Pause/Close) */}
                {!isFull && (
                   <View style={styles.overlay}>
                      <TouchableOpacity style={styles.miniPlayBtn} onPress={async () => {
@@ -184,7 +204,7 @@ export default function GlobalPlayer() {
                      </TouchableOpacity>
                      <TouchableOpacity style={styles.miniCloseBtn} onPress={async () => {
                          await setBackgroundAudio(false); 
-                         if (videoRef.current) { try { await videoRef.current.pauseAsync(); } catch(e){} }
+                         if (videoRef.current) await videoRef.current.pauseAsync();
                          setPlayerState('hidden'); setStreamUrl(null); pan.setValue({ x:0, y:0 });
                      }}>
                         <Ionicons name="close" size={24} color="#FFF" />
@@ -199,17 +219,19 @@ export default function GlobalPlayer() {
 
 const styles = StyleSheet.create({
   fullContainer: { position: 'absolute', top: 55, left: 0, width: width, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000' },
-  miniContainer: { position: 'absolute', bottom: 80, right: 15, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', zIndex: 9999, elevation: 15, borderRadius: 12, overflow: 'hidden' },
-  touchable: { flex: 1, width: '100%', height: '100%' },
-  fullVideoWrapper: { flex: 1, backgroundColor: '#000', width: '100%', height: '100%' },
-  miniVideoWrapper: { flex: 1, width: '100%', height: '100%', backgroundColor: '#111', borderRadius: 12, overflow: 'hidden' },
-  videoCoreWrapper: { flex: 1, width: '100%', height: '100%' },
+  miniContainer: { 
+    position: 'absolute', bottom: 80, right: 15, width: MINI_WIDTH, height: MINI_HEIGHT, 
+    backgroundColor: '#000', zIndex: 9999, borderRadius: 12, overflow: 'hidden',
+    elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.3, shadowRadius: 5
+  },
+  touchable: { flex: 1 },
+  fullVideoWrapper: { flex: 1, backgroundColor: '#000' },
+  miniVideoWrapper: { flex: 1, backgroundColor: '#111', position: 'relative' },
   video: { width: '100%', height: '100%' },
   loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  audioPosterContainer: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 10 },
+  audioPosterContainer: { ...StyleSheet.absoluteFillObject, zIndex: 10 },
   audioPosterBg: { width: '100%', height: '100%', resizeMode: 'cover' },
   audioPosterOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
-  audioIconCircle: { width: 90, height: 90, borderRadius: 45, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.5)' },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.3)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', zIndex: 20 },
   miniPlayBtn: { width: 45, height: 45, borderRadius: 25, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
   miniCloseBtn: { position: 'absolute', top: 5, right: 5, width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' }
