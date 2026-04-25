@@ -20,6 +20,7 @@ export default function GlobalPlayer() {
 
   const seekPosRef = useRef(0);
   const currentVideoIdRef = useRef(null);
+  const isLocalRef = useRef(false); // [FIXED]: এই লাইনটি যুক্ত করা হয়েছে
   
   const [playerState, setPlayerState] = useState('hidden'); 
   const [videoData, setVideoData] = useState(null);
@@ -59,7 +60,6 @@ export default function GlobalPlayer() {
           setStreamUrl(json.url);
 
           if (json.streamType === 'separate' && json.audioUrl) {
-              // ৩ সেকেন্ড ফিক্স: অডিওর জন্য ভিডিও আটকে থাকবে না
               syncAudioRef.current.unloadAsync().then(() => {
                   syncAudioRef.current.loadAsync({ uri: json.audioUrl }, { shouldPlay: isPlaying, positionMillis: seekPosRef.current }).catch(() => {});
               });
@@ -96,12 +96,19 @@ export default function GlobalPlayer() {
   useEffect(() => {
     const playSub = DeviceEventEmitter.addListener('playVideo', (data) => {
       currentVideoIdRef.current = data.videoId;
+      isLocalRef.current = !!(data.videoData && data.videoData.localUri);
       setVideoData(data.videoData);
       setPlayerState('full');
       setStreamUrl(null);
       setIsAudioMode(false);
       setBackgroundAudio(false);
       setVideoKey(Date.now().toString());
+      
+      if (isLocalRef.current) {
+          setStreamMode('combined');
+          setStreamUrl(data.videoData.localUri);
+          return;
+      }
       fetchStreamUrl(data.videoId, '720p');
     });
 
@@ -110,17 +117,15 @@ export default function GlobalPlayer() {
         await setBackgroundAudio(mode);
         
         if (mode && streamMode === 'separate') {
-            // [FIX]: Separate মোডে ভিডিওর সোর্স নাল করা হলো যাতে এমবি না কাটে
             if (videoRef.current) {
                 const status = await videoRef.current.getStatusAsync();
                 seekPosRef.current = status.positionMillis || 0;
                 await videoRef.current.unloadAsync();
             }
         } else if (!mode && streamMode === 'separate') {
-            // অডিও মোড অফ করলে ভিডিও আবার লোড হবে
             const aStatus = await syncAudioRef.current.getStatusAsync();
             seekPosRef.current = aStatus.positionMillis || 0;
-            setVideoKey(Date.now().toString()); // ফোরস রি-রেন্ডার
+            setVideoKey(Date.now().toString());
         }
     });
 
@@ -129,6 +134,17 @@ export default function GlobalPlayer() {
 
     return () => { playSub.remove(); toggleAudioSub.remove(); minSub.remove(); maxSub.remove(); };
   }, [streamMode]);
+
+  // CC (সাবটাইটেল) লোড করার ফাংশন
+  const fetchCC = async (langCode) => {
+    try {
+        const res = await fetch(`${MY_API_SERVER}/api/subtitles?id=${currentVideoIdRef.current}&lang=${langCode}`);
+        const json = await res.json();
+        if (json.success) setCurrentCC(json.subtitles);
+        else setCcText("Subtitle not found");
+        setShowSettings(false);
+    } catch(e) { setCcText(""); }
+  };
 
   const changeSpeed = async (speed) => {
     setPlaybackSpeed(speed);
@@ -147,7 +163,6 @@ export default function GlobalPlayer() {
         onPanResponderRelease: () => pan.flattenOffset()
      }).panHandlers)}>
         <View style={styles.videoWrapper}>
-            {/* [FIX]: Separate Audio mode এ থাকলে Video সোর্স নাল থাকবে এমবি বাঁচাতে */}
             {streamUrl && (
                 <Video 
                     key={videoKey}
@@ -200,7 +215,8 @@ export default function GlobalPlayer() {
                     {settingsTab === 'main' && (
                         <>
                             <TouchableOpacity style={styles.menuItem} onPress={() => setSettingsTab('cc')}>
-                                <Ionicons name="closed-captions" size={20} color="#FFF" />
+                                {/* [FIXED]: আইকনের নাম পরিবর্তন করে chatbubble-ellipses-outline দেওয়া হলো */}
+                                <Ionicons name="chatbubble-ellipses-outline" size={20} color="#FFF" />
                                 <Text style={styles.menuText}>CC (Captions)</Text>
                             </TouchableOpacity>
                             <TouchableOpacity style={styles.menuItem} onPress={() => setSettingsTab('speed')}>
@@ -208,6 +224,20 @@ export default function GlobalPlayer() {
                                 <Text style={styles.menuText}>Playback Speed ({playbackSpeed}x)</Text>
                             </TouchableOpacity>
                         </>
+                    )}
+                    {settingsTab === 'cc' && (
+                        ['bn', 'hi', 'en', 'ur'].map(lang => (
+                            <TouchableOpacity key={lang} style={styles.menuItem} onPress={() => fetchCC(lang)}>
+                                <Text style={styles.menuText}>{lang === 'bn' ? 'Bengali' : lang === 'hi' ? 'Hindi' : lang === 'en' ? 'English' : 'Urdu'}</Text>
+                            </TouchableOpacity>
+                        ))
+                    )}
+                    {settingsTab === 'speed' && (
+                        [0.25, 0.5, 1.0, 1.5, 2.0].map(s => (
+                            <TouchableOpacity key={s} style={styles.menuItem} onPress={() => changeSpeed(s)}>
+                                <Text style={[styles.menuText, playbackSpeed === s && {color: '#FF0000'}]}>{s === 1.0 ? 'Normal' : s + 'x'}</Text>
+                            </TouchableOpacity>
+                        ))
                     )}
                 </View>
             </TouchableOpacity>
@@ -225,7 +255,7 @@ const styles = StyleSheet.create({
   audioPosterContainer: { ...StyleSheet.absoluteFillObject, zIndex: 10 },
   audioPosterBg: { width: '100%', height: '100%', resizeMode: 'cover' },
   audioPosterOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
-  ccOverlay: { position: 'absolute', bottom: 40, width: '100%', alignItems: 'center' },
+  ccOverlay: { position: 'absolute', bottom: 40, width: '100%', alignItems: 'center', zIndex: 50 },
   ccTextStyle: { color: '#FFF', fontSize: 16, backgroundColor: 'rgba(0,0,0,0.8)', paddingHorizontal: 10, borderRadius: 5 },
   miniOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
