@@ -49,7 +49,6 @@ export default function GlobalPlayer() {
     } catch (e) {}
   };
 
-  // [FIX 1]: কোয়ালিটি ডাইনামিক করা হলো
   const fetchStreamUrl = async (vidId, targetQuality) => {
     try {
       const numQ = targetQuality ? targetQuality.toString().replace(/\D/g, '') : '720';
@@ -118,7 +117,6 @@ export default function GlobalPlayer() {
       fetchStreamUrl(data.videoId, initialQuality);
     });
 
-    // [FIX 1]: সেটিংস থেকে কোয়ালিটি চেঞ্জ করলে এখানে ধরবে এবং আপডেট করবে
     const qualitySub = DeviceEventEmitter.addListener('qualityChanged', async (newQuality) => {
         if (currentVideoIdRef.current && !isLocalRef.current) {
             if (videoRef.current) {
@@ -159,7 +157,7 @@ export default function GlobalPlayer() {
     try {
         const res = await fetch(`${MY_API_SERVER}/api/subtitles?id=${currentVideoIdRef.current}&lang=${langCode}`);
         const json = await res.json();
-        if (json.success) {
+        if (json.success && json.subtitles.length > 0) {
             setCurrentCC(json.subtitles);
         } else {
             setCcText("Subtitle not available");
@@ -176,7 +174,6 @@ export default function GlobalPlayer() {
     setShowSettings(false);
   };
 
-  // [FIX 2]: প্যান রেসপন্ডারের লজিক আপডেট করে ট্যাপ ডিটেকশন ঠিক করা হলো
   const panResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => false, 
     onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 5 || Math.abs(g.dy) > 5,
@@ -196,8 +193,8 @@ export default function GlobalPlayer() {
 
   return (
      <Animated.View style={[isFull ? styles.fullContainer : styles.miniContainer, !isFull && { transform: pan.getTranslateTransform() }]} {...(isFull ? {} : panResponder.panHandlers)}>
-        {/* [FIX 2]: TouchableOpacity ফিরিয়ে আনা হলো যাতে মিনি প্লেয়ারে চাপ দিলে আবার প্লেয়ার স্ক্রিনে যায় */}
-        <TouchableOpacity activeOpacity={1} disabled={isFull} style={{flex: 1}} onPress={() => {
+        {/* [FIX]: TouchableOpacity তে চাপ দিলে Player Screen এ ফিরে যাওয়ার লজিক */}
+        <TouchableOpacity activeOpacity={0.9} disabled={isFull} style={{flex: 1}} onPress={() => {
             if (!isFull && videoData) {
                 navigation.navigate('Player', { videoId: currentVideoIdRef.current, videoData });
                 setPlayerState('full');
@@ -240,15 +237,16 @@ export default function GlobalPlayer() {
                 )}
 
                 {!isFull && (
-                    <View style={styles.miniOverlay}>
-                        <TouchableOpacity onPress={() => setIsPlaying(!isPlaying)} style={{marginRight: 15, padding: 5}}>
+                    /* [FIX]: pointerEvents="box-none" দেওয়া হলো যাতে ফাঁকা জায়গায় চাপ দিলে TouchableOpacity কাজ করে */
+                    <View style={styles.miniOverlay} pointerEvents="box-none">
+                        <TouchableOpacity onPress={() => setIsPlaying(!isPlaying)} style={{marginRight: 15, padding: 10}}>
                             <Ionicons name={isPlaying ? "pause" : "play"} size={26} color="#FFF" />
                         </TouchableOpacity>
                         <TouchableOpacity onPress={async () => {
                             await setBackgroundAudio(false);
                             if (videoRef.current) await videoRef.current.pauseAsync();
                             setPlayerState('hidden'); setStreamUrl(null);
-                        }} style={{padding: 5}}>
+                        }} style={{padding: 10}}>
                             <Ionicons name="close" size={24} color="#FFF" />
                         </TouchableOpacity>
                     </View>
