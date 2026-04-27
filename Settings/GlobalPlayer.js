@@ -1,16 +1,11 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, Image, LogBox, Modal } from 'react-native';
+import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, Image, LogBox, Modal, BackHandler } from 'react-native';
 import { Video, Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 
-LogBox.ignoreLogs([
-    '[expo-av] Expo AV has been deprecated',
-    '[expo-av]: Video component from `expo-av` is deprecated',
-    'Video component from `expo-av` is deprecated'
-]);
+LogBox.ignoreLogs(['[expo-av] Expo AV has been deprecated']);
 
 const { width, height } = Dimensions.get('window');
 const PLAYER_HEIGHT = (width * 9) / 16;
@@ -44,6 +39,21 @@ export default function GlobalPlayer() {
 
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
+  // [NEW]: হার্ডওয়্যার ব্যাক বাটন হ্যান্ডলিং
+  useEffect(() => {
+    const backAction = () => {
+      if (playerState === 'full') {
+        setPlayerState('mini');
+        navigation.navigate('Home'); // সরাসরি হোম স্ক্রিনে চলে আসবে
+        return true;
+      }
+      return false;
+    };
+
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => backHandler.remove();
+  }, [playerState]);
+
   const setBackgroundAudio = async (enable) => {
     try {
         await Audio.setAudioModeAsync({
@@ -66,9 +76,8 @@ export default function GlobalPlayer() {
           setStreamUrl(json.url);
 
           if (json.streamType === 'separate' && json.audioUrl) {
-              syncAudioRef.current.unloadAsync().then(() => {
-                  syncAudioRef.current.loadAsync({ uri: json.audioUrl }, { shouldPlay: isPlaying, positionMillis: seekPosRef.current }).catch(() => {});
-              });
+              await syncAudioRef.current.unloadAsync().catch(()=>{});
+              await syncAudioRef.current.loadAsync({ uri: json.audioUrl }, { shouldPlay: isPlaying, positionMillis: seekPosRef.current }).catch(() => {});
           }
           setIsPlaying(true);
           setErrorMsg(null);
@@ -101,13 +110,15 @@ export default function GlobalPlayer() {
   };
 
   useEffect(() => {
-    const playSub = DeviceEventEmitter.addListener('playVideo', (data) => {
+    const playSub = DeviceEventEmitter.addListener('playVideo', async (data) => {
+      // [FIX]: নতুন ভিডিও চাপলে আগের ভিডিওটি "কাট" করার জন্য আনলোড করা
+      if (videoRef.current) await videoRef.current.unloadAsync().catch(()=>{});
+      await syncAudioRef.current.unloadAsync().catch(()=>{});
+
       currentVideoIdRef.current = data.videoId;
       isLocalRef.current = !!(data.videoData && data.videoData.localUri);
       setVideoData(data.videoData);
-      
-      // নতুন ভিডিও প্লে করার সময় প্লেয়ারকে আবার ফুল স্ক্রিন করা
-      setPlayerState('full');
+      setPlayerState('full'); // নতুন ভিডিও প্লে করলে সব সময় ফুল স্ক্রিন হবে
       setStreamUrl(null);
       setIsAudioMode(false);
       setBackgroundAudio(false);
@@ -165,35 +176,16 @@ export default function GlobalPlayer() {
     try {
         setCcText(`[${langCode.toUpperCase()}] CC Loading...`);
         setShowSettings(false);
-
         const res = await fetch(`${MY_API_SERVER}/api/subtitles?id=${currentVideoIdRef.current}&lang=${langCode}`);
         const json = await res.json();
-        
         if (json.success && json.subtitles.length > 0) {
             setCurrentCC(json.subtitles);
-            setCcText(`[${langCode.toUpperCase()}] CC Ready`);
-            setTimeout(() => setCcText(""), 2000);
+            setCcText("");
         } else {
             setCcText(`[${langCode.toUpperCase()}] CC Not Found`);
             setTimeout(() => setCcText(""), 3000);
         }
-    } catch(e) { 
-        setCcText("Failed to load CC");
-        setTimeout(() => setCcText(""), 3000);
-    }
-  };
-
-  const changeSpeed = async (speed) => {
-    setPlaybackSpeed(speed);
-    if (videoRef.current) await videoRef.current.setRateAsync(speed, true);
-    if (syncAudioRef.current) await syncAudioRef.current.setRateAsync(speed, true);
-    setShowSettings(false);
-  };
-
-  // [NEW]: ব্যাক বাটনে চাপ দিলে হোম স্ক্রিনে যাওয়া এবং প্লেয়ার ছোট করার লজিক
-  const handleBackPress = () => {
-    setPlayerState('mini'); 
-    navigation.navigate('Home'); 
+    } catch(e) { setCcText(""); }
   };
 
   const panResponder = useRef(PanResponder.create({
@@ -215,7 +207,7 @@ export default function GlobalPlayer() {
 
   return (
      <Animated.View style={[isFull ? styles.fullContainer : styles.miniContainer, !isFull && { transform: pan.getTranslateTransform() }]} {...(isFull ? {} : panResponder.panHandlers)}>
-        <TouchableOpacity activeOpacity={0.9} disabled={isFull} style={{flex: 1}} onPress={() => {
+        <TouchableOpacity activeOpacity={1} disabled={isFull} style={{flex: 1}} onPress={() => {
             if (!isFull && videoData) {
                 navigation.navigate('Player', { videoId: currentVideoIdRef.current, videoData });
                 setPlayerState('full');
@@ -237,28 +229,17 @@ export default function GlobalPlayer() {
                     />
                 )}
                 
-                {isAudioMode && !isLocalRef.current && (
-                    <View style={styles.audioPosterContainer}>
-                        <Image source={{ uri: videoData?.thumbnail }} style={styles.audioPosterBg} blurRadius={15} />
-                        <View style={styles.audioPosterOverlay}>
-                            <Ionicons name="musical-notes" size={isFull ? 50 : 20} color="#FFF" />
-                            <Text style={{color: '#FFF', marginTop: 10}}>Background Audio Playing</Text>
-                        </View>
-                    </View>
+                {/* [NEW]: ফুল স্ক্রিনে উপরের ব্যাক বাটন যা হোম এ নিয়ে যাবে */}
+                {isFull && (
+                    <TouchableOpacity style={styles.backBtn} onPress={() => { setPlayerState('mini'); navigation.navigate('Home'); }}>
+                        <Ionicons name="chevron-down" size={30} color="#FFF" />
+                    </TouchableOpacity>
                 )}
 
                 {isFull && ccText !== "" && (
                     <View style={styles.ccOverlay}><Text style={styles.ccTextStyle}>{ccText}</Text></View>
                 )}
 
-                {/* [NEW]: ব্যাক বাটন (বাম দিকে) */}
-                {isFull && (
-                    <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
-                        <Ionicons name="arrow-back" size={28} color="#FFF" />
-                    </TouchableOpacity>
-                )}
-
-                {/* সেটিংস বাটন (ডান দিকে) */}
                 {isFull && (
                     <TouchableOpacity style={styles.settingsIcon} onPress={() => { setSettingsTab('main'); setShowSettings(true); }}>
                         <Ionicons name="settings-sharp" size={24} color="#FFF" />
@@ -272,7 +253,7 @@ export default function GlobalPlayer() {
                         </TouchableOpacity>
                         <TouchableOpacity onPress={async () => {
                             await setBackgroundAudio(false);
-                            if (videoRef.current) await videoRef.current.pauseAsync();
+                            if (videoRef.current) await videoRef.current.unloadAsync();
                             setPlayerState('hidden'); setStreamUrl(null);
                         }} style={{padding: 10}}>
                             <Ionicons name="close" size={24} color="#FFF" />
@@ -291,25 +272,7 @@ export default function GlobalPlayer() {
                                 <Ionicons name="chatbubble-ellipses-outline" size={20} color="#FFF" />
                                 <Text style={styles.menuText}>CC (Captions)</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={styles.menuItem} onPress={() => setSettingsTab('speed')}>
-                                <Ionicons name="speedometer" size={20} color="#FFF" />
-                                <Text style={styles.menuText}>Playback Speed ({playbackSpeed}x)</Text>
-                            </TouchableOpacity>
                         </>
-                    )}
-                    {settingsTab === 'cc' && (
-                        ['bn', 'hi', 'en', 'ur'].map(lang => (
-                            <TouchableOpacity key={lang} style={styles.menuItem} onPress={() => fetchCC(lang)}>
-                                <Text style={styles.menuText}>{lang === 'bn' ? 'Bengali' : lang === 'hi' ? 'Hindi' : lang === 'en' ? 'English' : 'Urdu'}</Text>
-                            </TouchableOpacity>
-                        ))
-                    )}
-                    {settingsTab === 'speed' && (
-                        [0.25, 0.5, 1.0, 1.5, 2.0].map(s => (
-                            <TouchableOpacity key={s} style={styles.menuItem} onPress={() => changeSpeed(s)}>
-                                <Text style={[styles.menuText, playbackSpeed === s && {color: '#FF0000'}]}>{s === 1.0 ? 'Normal' : s + 'x'}</Text>
-                            </TouchableOpacity>
-                        ))
                     )}
                 </View>
             </TouchableOpacity>
@@ -323,11 +286,8 @@ const styles = StyleSheet.create({
   miniContainer: { position: 'absolute', bottom: 80, right: 15, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', zIndex: 9999, borderRadius: 12, overflow: 'hidden', elevation: 15, shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 5 },
   videoWrapper: { flex: 1, position: 'relative' },
   video: { width: '100%', height: '100%' },
-  backButton: { position: 'absolute', top: 10, left: 10, zIndex: 100, padding: 5 }, // [NEW] ব্যাক বাটনের ডিজাইন
-  settingsIcon: { position: 'absolute', top: 10, right: 10, zIndex: 100, padding: 5 },
-  audioPosterContainer: { ...StyleSheet.absoluteFillObject, zIndex: 10 },
-  audioPosterBg: { width: '100%', height: '100%', resizeMode: 'cover' },
-  audioPosterOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
+  backBtn: { position: 'absolute', top: 10, left: 10, zIndex: 100, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, padding: 2 },
+  settingsIcon: { position: 'absolute', top: 10, right: 10, zIndex: 100 },
   ccOverlay: { position: 'absolute', bottom: 40, width: '100%', alignItems: 'center', zIndex: 50 },
   ccTextStyle: { color: '#FFF', fontSize: 16, backgroundColor: 'rgba(0,0,0,0.8)', paddingHorizontal: 10, borderRadius: 5, textAlign: 'center' },
   miniOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
