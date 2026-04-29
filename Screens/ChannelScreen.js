@@ -53,7 +53,7 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // Memory Crash (Stack Overflow) এড়ানোর জন্য Iterative (Stack-based) সার্চিং লজিক
+  // নতুন আপডেট: সিরিয়াল ঠিক রাখা এবং সব ভিডিও খুঁজে বের করা
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
     const stack = [rootNode];
 
@@ -61,7 +61,8 @@ export default function ChannelScreen() {
       const node = stack.pop();
 
       if (Array.isArray(node)) {
-        for (let i = 0; i < node.length; i++) {
+        // Reverse Loop: যেন ভিডিওর আসল সিরিয়াল ঠিক থাকে (Chronological Order)
+        for (let i = node.length - 1; i >= 0; i--) {
           if (node[i] && typeof node[i] === 'object') stack.push(node[i]);
         }
       } else if (node && typeof node === 'object') {
@@ -70,8 +71,9 @@ export default function ChannelScreen() {
           categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
         }
 
-        if ((node.videoRenderer && node.videoRenderer.videoId) || (node.gridVideoRenderer && node.gridVideoRenderer.videoId)) {
-          const target = node.videoRenderer || node.gridVideoRenderer;
+        // compactVideoRenderer যোগ করা হয়েছে ছোট চ্যানেলের হোমপেজের ভিডিওর জন্য
+        if ((node.videoRenderer && node.videoRenderer.videoId) || (node.gridVideoRenderer && node.gridVideoRenderer.videoId) || (node.compactVideoRenderer && node.compactVideoRenderer.videoId)) {
+          const target = node.videoRenderer || node.gridVideoRenderer || node.compactVideoRenderer;
           
           const duration = target.lengthText?.simpleText || '';
           const publishedTime = target.publishedTimeText?.simpleText || ''; 
@@ -80,7 +82,6 @@ export default function ChannelScreen() {
           const isLive = JSON.stringify(target).includes('"BADGE_STYLE_TYPE_LIVE_NOW"');
           const videoId = target.videoId;
 
-          // 100% Reliable Standard Thumbnail URL (কোনোদিন ফেইল করবে না)
           const thumbnailUrl = thumbQuality === 'Data Saver' 
               ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` 
               : `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
@@ -96,7 +97,6 @@ export default function ChannelScreen() {
           const views = node.reelItemRenderer.viewCountText?.simpleText || 'N/A';
           const videoId = node.reelItemRenderer.videoId;
 
-          // Shorts এর জন্য Reliable URL
           const shortThumbnailUrl = thumbQuality === 'Data Saver' 
               ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` 
               : `https://i.ytimg.com/vi/${videoId}/oardefault.jpg`;
@@ -107,7 +107,7 @@ export default function ChannelScreen() {
           });
         } else {
           const values = Object.values(node);
-          for (let i = 0; i < values.length; i++) {
+          for (let i = values.length - 1; i >= 0; i--) {
             if (values[i] && typeof values[i] === 'object') stack.push(values[i]);
           }
         }
@@ -152,22 +152,33 @@ export default function ChannelScreen() {
         return; 
       }
 
-      let targetVideosUrl = `https://www.youtube.com${extractedChannelUrl}/videos`;
-      let targetShortsUrl = `https://www.youtube.com${extractedChannelUrl}/shorts`;
+      // ছোট চ্যানেলগুলোর জন্য URL ক্লিন আপ করা হচ্ছে
+      let baseUrl = extractedChannelUrl.split('?')[0];
+      if(baseUrl.endsWith('/featured')) baseUrl = baseUrl.replace('/featured', '');
+      if(baseUrl.endsWith('/videos')) baseUrl = baseUrl.replace('/videos', '');
+      if(baseUrl.endsWith('/shorts')) baseUrl = baseUrl.replace('/shorts', '');
 
-      const [videosRes, shortsRes] = await Promise.all([
+      let targetHomeUrl = `https://www.youtube.com${baseUrl}`;
+      let targetVideosUrl = `https://www.youtube.com${baseUrl}/videos`;
+      let targetShortsUrl = `https://www.youtube.com${baseUrl}/shorts`;
+
+      // একই সাথে Home এবং Videos দুই পেজেই হিট করা হচ্ছে
+      const [homeRes, videosRes, shortsRes] = await Promise.all([
+        fetch(targetHomeUrl, { headers: { 'User-Agent': DESKTOP_AGENT } }),
         fetch(targetVideosUrl, { headers: { 'User-Agent': DESKTOP_AGENT } }),
         fetch(targetShortsUrl, { headers: { 'User-Agent': DESKTOP_AGENT } })
       ]);
 
+      const homeHtml = await homeRes.text();
       const videosHtml = await videosRes.text();
       const shortsHtml = await shortsRes.text();
 
-      const apiMatch = videosHtml.match(/"INNERTUBE_API_KEY":"(.*?)"/);
+      const apiMatch = videosHtml.match(/"INNERTUBE_API_KEY":"(.*?)"/) || homeHtml.match(/"INNERTUBE_API_KEY":"(.*?)"/);
       if (apiMatch && apiMatch[1]) {
           setApiKey(apiMatch[1]);
       }
 
+      let homeMatch = homeHtml.match(/ytInitialData\s*=\s*({.+?});/) || homeHtml.match(/var ytInitialData = (.*?);<\/script>/);
       let videosMatch = videosHtml.match(/ytInitialData\s*=\s*({.+?});/) || videosHtml.match(/var ytInitialData = (.*?);<\/script>/);
       let shortsMatch = shortsHtml.match(/ytInitialData\s*=\s*({.+?});/) || shortsHtml.match(/var ytInitialData = (.*?);<\/script>/);
 
@@ -177,16 +188,19 @@ export default function ChannelScreen() {
         if (match && match[1]) {
           try {
             const parsedData = JSON.parse(match[1]);
-            extractDataIteratively(parsedData, categorizedData, tabType); // নতুন স্ট্যাক লজিক কল করা হলো
+            extractDataIteratively(parsedData, categorizedData, tabType);
             return parsedData;
           } catch (error) { return null; }
         }
         return null;
       };
 
+      // হোমপেজ এবং ভিডিওজপেজ— দুটোর ডেটাই এক্সট্র্যাক্ট করা হচ্ছে
+      const parsedHomeData = processMatch(homeMatch, 'Videos');
       const parsedVideosData = processMatch(videosMatch, 'Videos');
       processMatch(shortsMatch, 'Shorts');
 
+      // ডুপ্লিকেট ভিডিও রিমুভ করা হচ্ছে
       categorizedData.Videos = categorizedData.Videos.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
       categorizedData.Shorts = categorizedData.Shorts.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
 
@@ -204,8 +218,10 @@ export default function ChannelScreen() {
 
       setTabData({ Videos: categorizedData.Videos, Shorts: categorizedData.Shorts });
 
-      if (parsedVideosData) {
-        const header = parsedVideosData?.header?.c4TabbedHeaderRenderer || parsedVideosData?.header?.pageHeaderRenderer;
+      // যদি ভিডিও পেজ না থাকে, তবে হোম পেজ থেকে হেডার এবং ব্যানার সেট হবে
+      let parsedDataForHeader = parsedVideosData || parsedHomeData;
+      if (parsedDataForHeader) {
+        const header = parsedDataForHeader?.header?.c4TabbedHeaderRenderer || parsedDataForHeader?.header?.pageHeaderRenderer;
         let bannerSrc = null;
         if (header?.banner?.thumbnails) bannerSrc = header.banner.thumbnails;
         else if (header?.pageHeaderBanner?.pageHeaderBannerImageViewModel?.image?.sources) bannerSrc = header.pageHeaderBanner.pageHeaderBannerImageViewModel.image.sources;
