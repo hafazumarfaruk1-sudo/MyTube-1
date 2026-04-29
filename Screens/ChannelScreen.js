@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList, SafeAreaView, StatusBar, Dimensions, ActivityIndicator, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,14 +8,20 @@ import { DeviceEventEmitter } from 'react-native';
 import * as NavigationBar from 'expo-navigation-bar';
 
 const { width } = Dimensions.get('window');
-const MOBILE_AGENT = 'Mozilla/5.0 (Linux; Android 13; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36';
+// আবার Desktop Agent-এ ফিরে যাওয়া হলো, কারণ ডেস্কটপের JSON স্ট্রাকচারেই ব্যানার এবং ভিডিও সুন্দরভাবে পাওয়া যায়।
+const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-// --- Helper Functions (বাইরে রাখায় কোড পরিষ্কার এবং ফাস্ট হবে) ---
-const getThumb = (id, q) => id ? `https://i.ytimg.com/vi/${id}/${q === 'Data Saver' ? 'mqdefault' : 'hqdefault'}.jpg` : 'https://i.ibb.co/QfWY8Zq/placeholder.jpg';
+// --- Helper Functions ---
+const getThumb = (id, q) => {
+  if (!id) return 'https://i.ibb.co/QfWY8Zq/placeholder.jpg';
+  return `https://i.ytimg.com/vi/${id}/${q === 'Data Saver' ? 'mqdefault' : 'hqdefault'}.jpg`;
+};
 
 const extractYtData = (html) => {
-  const match = html.match(/(var ytInitialData|window\["ytInitialData"\])\s*=\s*({.+?});/);
-  return match ? JSON.parse(match[2]) : null;
+  try {
+    const match = html.match(/(var ytInitialData|window\["ytInitialData"\])\s*=\s*({.+?});/);
+    return match ? JSON.parse(match[2]) : null;
+  } catch (e) { return null; }
 };
 
 const parseVid = (target, isShort, chName, chAvatar, quality) => ({
@@ -73,18 +80,23 @@ export default function ChannelScreen() {
   const fetchChannelData = async () => {
     setLoading(true);
     try {
-      const searchRes = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(channelName)}`, { headers: { 'User-Agent': MOBILE_AGENT } });
+      const searchRes = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(channelName)}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
       const searchData = extractYtData(await searchRes.text());
       
       let channelUrl = null;
-      JSON.stringify(searchData, (key, val) => {
-        if (key === 'channelRenderer' && val.title?.simpleText?.toLowerCase().includes(channelName.split(' ')[0].toLowerCase())) 
-          channelUrl = val.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url;
-        return val;
-      });
+      if (searchData) {
+        JSON.stringify(searchData, (key, val) => {
+          if (key === 'channelRenderer' && val.title?.simpleText?.toLowerCase().includes(channelName.split(' ')[0].toLowerCase())) 
+            channelUrl = val.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url;
+          return val;
+        });
+      }
 
       const base = `https://www.youtube.com${channelUrl || '/results?search_query=' + encodeURIComponent(channelName)}`;
-      const [vRes, sRes] = await Promise.all([fetch(`${base}/videos`, { headers: { 'User-Agent': MOBILE_AGENT } }), fetch(`${base}/shorts`, { headers: { 'User-Agent': MOBILE_AGENT } })]);
+      const [vRes, sRes] = await Promise.all([
+        fetch(`${base}/videos`, { headers: { 'User-Agent': DESKTOP_AGENT } }), 
+        fetch(`${base}/shorts`, { headers: { 'User-Agent': DESKTOP_AGENT } })
+      ]);
       
       const vHtml = await vRes.text();
       const sHtml = await sRes.text();
@@ -97,15 +109,23 @@ export default function ChannelScreen() {
       const uniqueVids = [...new Map(newData.Videos.map(v => [v.id, v])).values()];
       const liveVid = uniqueVids.find(v => v.isLive);
       
-      setChannelInfo({ ...channelInfo, isLive: !!liveVid, liveVid });
+      setChannelInfo(prev => ({ ...prev, isLive: !!liveVid, liveVid }));
       setTabData({ ...newData, Videos: uniqueVids });
 
       const vData = extractYtData(vHtml);
       if (vData) {
         const header = vData.header?.c4TabbedHeaderRenderer || vData.header?.pageHeaderRenderer;
-        const banner = header?.banner?.thumbnails?.pop()?.url || header?.pageHeaderBanner?.pageHeaderBannerImageViewModel?.image?.sources?.pop()?.url || null;
-        const subs = header?.subscriberCountText?.simpleText || 'N/A';
-        setChannelInfo(prev => ({ ...prev, banner, subs }));
+        
+        // ব্যানার লজিক ফিক্স করা হলো (Array Mutation এড়ানোর জন্য)
+        let bannerSources = header?.banner?.thumbnails || header?.pageHeaderBanner?.pageHeaderBannerImageViewModel?.image?.sources || header?.content?.pageHeaderViewModel?.banner?.imageBannerViewModel?.image?.sources;
+        let bannerUrl = null;
+        if (bannerSources && bannerSources.length > 0) {
+          bannerUrl = bannerSources[bannerSources.length - 1].url;
+          if (bannerUrl && bannerUrl.startsWith('//')) bannerUrl = 'https:' + bannerUrl; // // দিয়ে শুরু হলে https যোগ করা
+        }
+        
+        const subs = header?.subscriberCountText?.simpleText || header?.content?.pageHeaderViewModel?.metadata?.metadataRows?.[1]?.metadataParts?.[0]?.text?.content || 'N/A';
+        setChannelInfo(prev => ({ ...prev, banner: bannerUrl, subs }));
       }
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
@@ -115,7 +135,7 @@ export default function ChannelScreen() {
     setIsFetchingMore(true);
     try {
       const res = await fetch(`https://www.youtube.com/youtubei/v1/browse?key=${tabData.apiKey}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': MOBILE_AGENT },
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': DESKTOP_AGENT },
         body: JSON.stringify({ context: { client: { clientName: 'WEB', clientVersion: tabData.clientVer } }, continuation: tabData.nextToken })
       });
       const data = await res.json();
@@ -137,7 +157,6 @@ export default function ChannelScreen() {
     await AsyncStorage.setItem('subscribedChannels', JSON.stringify(subs));
   };
 
-  // --- অপ্টিমাইজড ফোল্ডার লজিক (Array flatMap & Regex) ---
   const displayData = useMemo(() => {
     if (activeTab === 'Shorts') return tabData.Shorts;
     const groups = { 'This week video': [], 'This month video': [], 'This year video': [], 'Older videos': [] };
@@ -158,25 +177,25 @@ export default function ChannelScreen() {
 
   const renderItem = ({ item }) => {
     if (activeTab === 'Shorts') return (
-      <TouchableOpacity style={styles.shortItem} onPress={() => navigation.navigate('ShortsScreen', { videoId: item.id, videoData: item })}>
+      <TouchableOpacity style={styles.shortItem} activeOpacity={0.8} onPress={() => navigation.navigate('ShortsScreen', { videoId: item.id, videoData: item })}>
         <Image source={{ uri: item.thumbnail }} style={styles.shortImg} />
         <View style={styles.shortOverlay}><Ionicons name="play-outline" size={14} color="#FFF" /><Text style={styles.shortTxt}>{item.views}</Text></View>
         <Text style={styles.shortTitle} numberOfLines={2}>{item.title}</Text>
       </TouchableOpacity>
     );
     if (item.isHeader) return (
-      <TouchableOpacity style={styles.headerRow} onPress={() => setExpandedGroups(p => ({ ...p, [item.title]: !p[item.title] }))}>
+      <TouchableOpacity style={styles.headerRow} activeOpacity={0.7} onPress={() => setExpandedGroups(p => ({ ...p, [item.title]: !p[item.title] }))}>
         <Text style={styles.headerTxt}>{item.title}</Text>
         <Text style={styles.headerCount}>{item.count} videos <Ionicons name={expandedGroups[item.title] ? "chevron-up" : "chevron-down"} size={16} /></Text>
       </TouchableOpacity>
     );
     return (
       <View style={styles.vidList}>
-        <TouchableOpacity style={styles.vidThumbWrap} onPress={() => navigation.navigate('Player', { videoId: item.id, videoData: item })}>
+        <TouchableOpacity style={styles.vidThumbWrap} activeOpacity={0.8} onPress={() => navigation.navigate('Player', { videoId: item.id, videoData: item })}>
           <Image source={{ uri: item.thumbnail }} style={styles.vidImg} />
           {item.duration ? <Text style={styles.vidDur}>{item.duration}</Text> : null}
         </TouchableOpacity>
-        <TouchableOpacity style={styles.vidInfo} onPress={() => navigation.navigate('Player', { videoId: item.id, videoData: item })}>
+        <TouchableOpacity style={styles.vidInfo} activeOpacity={0.8} onPress={() => navigation.navigate('Player', { videoId: item.id, videoData: item })}>
           <Text style={styles.vidTitle} numberOfLines={3}>{item.title}</Text>
           <Text style={styles.vidMeta}>{item.views} • {item.publishedTime}</Text>
         </TouchableOpacity>
@@ -186,11 +205,11 @@ export default function ChannelScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar hidden />
+      <StatusBar hidden={true} />
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => navigation.goBack()}><Ionicons name="arrow-back" size={24} color="#FFF" /></TouchableOpacity>
         <View style={styles.logoWrap}><Ionicons name="logo-youtube" size={24} color="#FF0000" /><Text style={styles.logoTxt}>MyTube</Text></View>
-        <TouchableOpacity style={styles.searchBox} onPress={() => navigation.navigate('searchsettings')}><Text style={styles.searchTxt}>Search...</Text><Ionicons name="search" size={16} color="#AAA" /></TouchableOpacity>
+        <TouchableOpacity style={styles.searchBox} activeOpacity={0.8} onPress={() => navigation.navigate('searchsettings')}><Text style={styles.searchTxt}>Search...</Text><Ionicons name="search" size={16} color="#AAA" /></TouchableOpacity>
       </View>
 
       <FlatList 
@@ -200,15 +219,17 @@ export default function ChannelScreen() {
         ListFooterComponent={isFetchingMore ? <ActivityIndicator size="small" color="#F00" style={{ margin: 20 }} /> : null}
         ListHeaderComponent={() => (
           <View>
-            <View style={styles.bannerWrap}>{channelInfo.banner ? <Image source={{ uri: channelInfo.banner }} style={styles.banner} /> : <View style={styles.bannerPlc}><Ionicons name="logo-youtube" size={40} color="#F00" /><Text style={{ color: '#FFF' }}>MyTube</Text></View>}</View>
+            <View style={styles.bannerWrap}>
+              {channelInfo.banner ? <Image source={{ uri: channelInfo.banner }} style={styles.banner} /> : <View style={styles.bannerPlc}><Ionicons name="logo-youtube" size={40} color="#F00" /><Text style={{ color: '#FFF' }}>MyTube</Text></View>}
+            </View>
             <View style={styles.profileBox}>
-              <TouchableOpacity onPress={() => channelInfo.isLive && navigation.navigate('Player', { videoId: channelInfo.liveVid.id, videoData: channelInfo.liveVid })}>
+              <TouchableOpacity activeOpacity={0.8} onPress={() => channelInfo.isLive && navigation.navigate('Player', { videoId: channelInfo.liveVid.id, videoData: channelInfo.liveVid })}>
                 <Image source={{ uri: channelAvatar }} style={styles.avatar} />
                 {channelInfo.isLive && <Text style={styles.liveBadge}>LIVE</Text>}
               </TouchableOpacity>
               <View style={styles.chInfo}><Text style={styles.chTitle}>{channelName}</Text><Text style={styles.chMeta}>@{channelName.replace(/\s+/g, '').toLowerCase()} • {channelInfo.subs}</Text></View>
             </View>
-            <TouchableOpacity style={[styles.subBtn, isSubscribed ? { backgroundColor: '#272727' } : { backgroundColor: '#FFF' }]} onPress={toggleSub}>
+            <TouchableOpacity style={[styles.subBtn, isSubscribed ? { backgroundColor: '#272727' } : { backgroundColor: '#FFF' }]} activeOpacity={0.8} onPress={toggleSub}>
               <Ionicons name={isSubscribed ? "notifications-outline" : "notifications"} size={18} color={isSubscribed ? "#FFF" : "#000"} />
               <Text style={{ color: isSubscribed ? '#FFF' : '#000', fontWeight: 'bold' }}>{isSubscribed ? 'Subscribed' : 'Subscribe'}</Text>
             </TouchableOpacity>
@@ -230,14 +251,14 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', padding: 10, backgroundColor: '#0F0F0F', borderBottomWidth: 1, borderBottomColor: '#222', gap: 10 },
   logoWrap: { flexDirection: 'row', alignItems: 'center' }, logoTxt: { color: '#FFF', fontSize: 15, fontWeight: 'bold', marginLeft: 4 },
   searchBox: { flex: 1, flexDirection: 'row', backgroundColor: '#222', borderRadius: 20, padding: 10, justifyContent: 'space-between', alignItems: 'center' }, searchTxt: { color: '#888', fontSize: 13 },
-  bannerWrap: { width, height: width * 0.25, backgroundColor: '#222' }, banner: { width: '100%', height: '100%' }, bannerPlc: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  bannerWrap: { width, height: width * 0.25, backgroundColor: '#222' }, banner: { width: '100%', height: '100%', resizeMode: 'cover' }, bannerPlc: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   profileBox: { flexDirection: 'row', padding: 15, alignItems: 'center', gap: 15 }, avatar: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#333' },
   liveBadge: { position: 'absolute', bottom: -5, alignSelf: 'center', backgroundColor: '#F00', color: '#FFF', fontSize: 10, fontWeight: 'bold', paddingHorizontal: 6, borderRadius: 4, borderWidth: 2, borderColor: '#000' },
   chInfo: { flex: 1 }, chTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFF' }, chMeta: { fontSize: 12, color: '#AAA', marginTop: 2 },
   subBtn: { flexDirection: 'row', padding: 10, marginHorizontal: 15, borderRadius: 20, justifyContent: 'center', alignItems: 'center', gap: 5, marginBottom: 15 },
   tabs: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#222', paddingHorizontal: 10 }, tab: { padding: 15 }, activeTab: { borderBottomWidth: 2, borderBottomColor: '#FFF' }, tabTxt: { color: '#AAA', fontWeight: 'bold' },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 12, backgroundColor: '#1A1A1A', margin: 10, borderRadius: 8 }, headerTxt: { color: '#FFF', fontWeight: 'bold' }, headerCount: { color: '#888', fontSize: 12 },
-  vidList: { flexDirection: 'row', paddingHorizontal: 15, marginBottom: 15, gap: 12 }, vidThumbWrap: { width: 140, aspectRatio: 16/9, borderRadius: 8, overflow: 'hidden' }, vidImg: { width: '100%', height: '100%' }, vidDur: { position: 'absolute', bottom: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.8)', color: '#FFF', fontSize: 10, padding: 3, borderRadius: 4 },
+  vidList: { flexDirection: 'row', paddingHorizontal: 15, marginBottom: 15, gap: 12 }, vidThumbWrap: { width: 140, aspectRatio: 16/9, borderRadius: 8, overflow: 'hidden', backgroundColor: '#111' }, vidImg: { width: '100%', height: '100%', resizeMode: 'cover' }, vidDur: { position: 'absolute', bottom: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.8)', color: '#FFF', fontSize: 10, padding: 3, borderRadius: 4 },
   vidInfo: { flex: 1 }, vidTitle: { color: '#FFF', fontSize: 14, fontWeight: '500', marginBottom: 6 }, vidMeta: { color: '#AAA', fontSize: 12 },
-  shortItem: { width: width/2 - 10, margin: 5, backgroundColor: '#111', borderRadius: 8, overflow: 'hidden' }, shortImg: { width: '100%', height: 250 }, shortOverlay: { position: 'absolute', bottom: 45, left: 5, flexDirection: 'row' }, shortTxt: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginLeft: 3 }, shortTitle: { color: '#FFF', fontSize: 13, padding: 8 }
+  shortItem: { width: width/2 - 10, margin: 5, backgroundColor: '#111', borderRadius: 8, overflow: 'hidden' }, shortImg: { width: '100%', height: 250, resizeMode: 'cover' }, shortOverlay: { position: 'absolute', bottom: 45, left: 5, flexDirection: 'row' }, shortTxt: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginLeft: 3 }, shortTitle: { color: '#FFF', fontSize: 13, padding: 8 }
 });
