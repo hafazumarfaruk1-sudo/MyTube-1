@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, SafeAreaView, Platform, StatusBar, Keyboard, ActivityIndicator, Image, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -92,29 +93,43 @@ export default function SearchSettingScreen() {
 
     const finalFeed = [];
     
+    // চ্যানেল এক্সট্রাকশন
     extractedChannels.forEach(ch => finalFeed.push({
       type: 'channel', id: ch.channelId, title: ch.title?.simpleText,
       avatar: ch.thumbnail?.thumbnails?.[0]?.url, subscribers: ch.subscriberCountText?.simpleText
     }));
 
-    const formattedShorts = extractedShorts.map(s => ({
-      id: s.videoId, title: s.headline?.simpleText, views: s.viewCountText?.simpleText,
-      thumbnail: `https://i.ytimg.com/vi/${s.videoId}/oardefault.jpg`
-    })).slice(0, 12);
+    // শর্টস এক্সট্রাকশন (ডুপ্লিকেট রিমুভ করা হয়েছে)
+    const uniqueShortsMap = new Map();
+    extractedShorts.forEach(s => {
+      if (s.videoId && !uniqueShortsMap.has(s.videoId)) {
+        uniqueShortsMap.set(s.videoId, {
+          id: s.videoId, title: s.headline?.simpleText, views: s.viewCountText?.simpleText,
+          thumbnail: `https://i.ytimg.com/vi/${s.videoId}/oardefault.jpg`
+        });
+      }
+    });
+    const formattedShorts = Array.from(uniqueShortsMap.values()).slice(0, 12);
 
     if (formattedShorts.length > 0) {
       finalFeed.push({ type: 'shorts_shelf', id: 'shorts_' + Date.now(), shorts: formattedShorts });
     }
 
-    const formattedVideos = extractedVideos.map(v => ({
-      type: 'video', id: v.videoId, title: v.title?.runs?.[0]?.text,
-      channel: v.ownerText?.runs?.[0]?.text, views: v.shortViewCountText?.simpleText,
-      duration: v.lengthText?.simpleText, publishedTime: v.publishedTimeText?.simpleText,
-      thumbnail: v.thumbnail?.thumbnails?.[v.thumbnail.thumbnails.length - 1]?.url,
-      avatar: v.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails?.[0]?.url
-    }));
+    // লং ভিডিও এক্সট্রাকশন (ডুপ্লিকেট রিমুভ করা হয়েছে)
+    const uniqueVideosMap = new Map();
+    extractedVideos.forEach(v => {
+      if (v.videoId && !uniqueVideosMap.has(v.videoId)) {
+        uniqueVideosMap.set(v.videoId, {
+          type: 'video', id: v.videoId, title: v.title?.runs?.[0]?.text,
+          channel: v.ownerText?.runs?.[0]?.text, views: v.shortViewCountText?.simpleText,
+          duration: v.lengthText?.simpleText, publishedTime: v.publishedTimeText?.simpleText,
+          thumbnail: v.thumbnail?.thumbnails?.[v.thumbnail.thumbnails.length - 1]?.url,
+          avatar: v.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails?.[0]?.url
+        });
+      }
+    });
     
-    finalFeed.push(...formattedVideos);
+    finalFeed.push(...Array.from(uniqueVideosMap.values()));
     return { finalFeed, nextToken };
   };
 
@@ -132,14 +147,20 @@ export default function SearchSettingScreen() {
             <Ionicons name="play-circle" size={22} color="#FF0000" />
             <Text style={styles.shelfTitle}>Shorts</Text>
           </View>
-          <FlatList horizontal showsHorizontalScrollIndicator={false} data={item.shorts} renderItem={({item: short}) => (
-            <TouchableOpacity style={styles.shortCard} onPress={() => navigation.navigate('Shorts', { initialVideoId: short.id })}>
-              <Image source={{ uri: short.thumbnail }} style={styles.shortThumb} />
-              <View style={styles.shortOverlay}>
-                <Text style={styles.shortTitle} numberOfLines={2}>{short.title}</Text>
-                <Text style={styles.shortViews}>{short.views}</Text>
-              </View>
-            </TouchableOpacity>
+          {/* এখানে Shorts-এর keyExtractor ফিক্স করা হয়েছে */}
+          <FlatList 
+            horizontal 
+            showsHorizontalScrollIndicator={false} 
+            data={item.shorts} 
+            keyExtractor={(short, index) => short.id + '_' + index.toString()} 
+            renderItem={({item: short}) => (
+              <TouchableOpacity style={styles.shortCard} onPress={() => navigation.navigate('Shorts', { initialVideoId: short.id })}>
+                <Image source={{ uri: short.thumbnail }} style={styles.shortThumb} />
+                <View style={styles.shortOverlay}>
+                  <Text style={styles.shortTitle} numberOfLines={2}>{short.title}</Text>
+                  <Text style={styles.shortViews}>{short.views}</Text>
+                </View>
+              </TouchableOpacity>
           )} />
         </View>
       );
@@ -153,7 +174,6 @@ export default function SearchSettingScreen() {
             {item.duration && <View style={styles.duration}><Text style={styles.durationText}>{item.duration}</Text></View>}
           </TouchableOpacity>
           <View style={styles.videoInfo}>
-            {/* এখানে Channel নেভিগেশন ফিক্স করা হয়েছে */}
             <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Channel', { channelName: item.channel, channelAvatar: item.avatar })}>
               <Image source={{ uri: item.avatar }} style={styles.channelAvatar} />
             </TouchableOpacity>
@@ -212,7 +232,16 @@ export default function SearchSettingScreen() {
       ) : isSearching ? (
         <View style={styles.center}><ActivityIndicator size="large" color="#FF0000" /></View>
       ) : (
-        <FlatList data={searchResults} keyExtractor={(item) => item.id} renderItem={renderItem} onEndReached={handleLoadMore} onEndReachedThreshold={0.5} ListFooterComponent={isLoadingMore && <ActivityIndicator color="#FF0000" style={{ margin: 20 }} />} contentContainerStyle={{ paddingBottom: 20 }} />
+        <FlatList 
+          data={searchResults} 
+          /* এখানে Main FlatList-এর keyExtractor ফিক্স করা হয়েছে */
+          keyExtractor={(item, index) => item.id + '_' + index.toString()} 
+          renderItem={renderItem} 
+          onEndReached={handleLoadMore} 
+          onEndReachedThreshold={0.5} 
+          ListFooterComponent={isLoadingMore && <ActivityIndicator color="#FF0000" style={{ margin: 20 }} />} 
+          contentContainerStyle={{ paddingBottom: 20 }} 
+        />
       )}
     </SafeAreaView>
   );
