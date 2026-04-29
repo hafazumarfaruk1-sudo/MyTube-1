@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-// এখান থেকে SafeAreaView সরিয়ে দেওয়া হয়েছে
+// লক্ষ্য করুন: SafeAreaView এখান থেকে বাদ দিয়ে নিচে আলাদাভাবে ইম্পোর্ট করা হয়েছে
 import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList, StatusBar, Dimensions, ActivityIndicator } from 'react-native';
-// নতুন SafeAreaView ইম্পোর্ট করা হলো
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, useIsFocused } from '@react-navigation/native';
@@ -56,7 +55,6 @@ export default function ChannelScreen() {
   }, [channelName, isFocused]);
 
   const extractChannelDataRecursively = (node, categorizedData, tabType) => {
-    
     const getThumbnail = (thumbnailsObject) => {
       if (thumbnailsObject && thumbnailsObject.thumbnails && thumbnailsObject.thumbnails.length > 0) {
         const thumbs = thumbnailsObject.thumbnails;
@@ -314,8 +312,7 @@ export default function ChannelScreen() {
   };
 
   const renderItem = ({ item }) => {
-    // এখানে আমরা চেক করছি যে ছবির লিংকে কী আসছে
-    console.log("Checking Thumbnail URL:", item.thumbnail);
+    console.log("Checking Thumbnail URL:", item.thumbnail); // টার্মিনাল লগিং
 
     if (activeTab === 'Shorts') {
       return (
@@ -416,8 +413,9 @@ export default function ChannelScreen() {
       </View>
 
       <View style={styles.tabScrollContainer}>
+        {/* এখানেই মূল সংশোধনটি করা হয়েছে (horizontal={true}) */}
         <FlatList 
-          horizontal 
+          horizontal={true} 
           showsHorizontalScrollIndicator={false} 
           data={['Videos', 'Shorts']} 
           keyExtractor={(item) => item} 
