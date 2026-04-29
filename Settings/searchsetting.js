@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, SafeAreaView, Platform, StatusBar, Keyboard, ActivityIndicator, Image, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -6,7 +5,7 @@ import { useNavigation, useIsFocused } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
-const HEADER_HEIGHT = height / 12; // ডিভাইসের ১২ ভাগের ১ ভাগ উচ্চতা
+const HEADER_HEIGHT = height / 12; 
 const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 export default function SearchSettingScreen() {
@@ -93,13 +92,16 @@ export default function SearchSettingScreen() {
 
     const finalFeed = [];
     
-    // চ্যানেল এক্সট্রাকশন
+    // চ্যানেল এক্সট্রাকশনের সময় সরাসরি চ্যানেলের লিংক (channelUrl) নেওয়া হচ্ছে
     extractedChannels.forEach(ch => finalFeed.push({
-      type: 'channel', id: ch.channelId, title: ch.title?.simpleText,
-      avatar: ch.thumbnail?.thumbnails?.[0]?.url, subscribers: ch.subscriberCountText?.simpleText
+      type: 'channel', 
+      id: ch.channelId, 
+      title: ch.title?.simpleText,
+      avatar: ch.thumbnail?.thumbnails?.[0]?.url, 
+      subscribers: ch.subscriberCountText?.simpleText,
+      channelUrl: ch.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url 
     }));
 
-    // শর্টস এক্সট্রাকশন (ডুপ্লিকেট রিমুভ করা হয়েছে)
     const uniqueShortsMap = new Map();
     extractedShorts.forEach(s => {
       if (s.videoId && !uniqueShortsMap.has(s.videoId)) {
@@ -115,16 +117,21 @@ export default function SearchSettingScreen() {
       finalFeed.push({ type: 'shorts_shelf', id: 'shorts_' + Date.now(), shorts: formattedShorts });
     }
 
-    // লং ভিডিও এক্সট্রাকশন (ডুপ্লিকেট রিমুভ করা হয়েছে)
+    // ভিডিও এক্সট্রাকশনের সময় চ্যানেলের লিংক (channelUrl) নেওয়া হচ্ছে
     const uniqueVideosMap = new Map();
     extractedVideos.forEach(v => {
       if (v.videoId && !uniqueVideosMap.has(v.videoId)) {
         uniqueVideosMap.set(v.videoId, {
-          type: 'video', id: v.videoId, title: v.title?.runs?.[0]?.text,
-          channel: v.ownerText?.runs?.[0]?.text, views: v.shortViewCountText?.simpleText,
-          duration: v.lengthText?.simpleText, publishedTime: v.publishedTimeText?.simpleText,
+          type: 'video', 
+          id: v.videoId, 
+          title: v.title?.runs?.[0]?.text,
+          channel: v.ownerText?.runs?.[0]?.text, 
+          views: v.shortViewCountText?.simpleText,
+          duration: v.lengthText?.simpleText, 
+          publishedTime: v.publishedTimeText?.simpleText,
           thumbnail: v.thumbnail?.thumbnails?.[v.thumbnail.thumbnails.length - 1]?.url,
-          avatar: v.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails?.[0]?.url
+          avatar: v.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails?.[0]?.url,
+          channelUrl: v.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url 
         });
       }
     });
@@ -147,7 +154,6 @@ export default function SearchSettingScreen() {
             <Ionicons name="play-circle" size={22} color="#FF0000" />
             <Text style={styles.shelfTitle}>Shorts</Text>
           </View>
-          {/* এখানে Shorts-এর keyExtractor ফিক্স করা হয়েছে */}
           <FlatList 
             horizontal 
             showsHorizontalScrollIndicator={false} 
@@ -174,12 +180,14 @@ export default function SearchSettingScreen() {
             {item.duration && <View style={styles.duration}><Text style={styles.durationText}>{item.duration}</Text></View>}
           </TouchableOpacity>
           <View style={styles.videoInfo}>
-            <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Channel', { channelName: item.channel, channelAvatar: item.avatar })}>
+            {/* লোগোতে চাপ দিলে চ্যানেল লিংক (channelUrl) পাস হবে */}
+            <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Channel', { channelName: item.channel, channelAvatar: item.avatar, channelUrl: item.channelUrl })}>
               <Image source={{ uri: item.avatar }} style={styles.channelAvatar} />
             </TouchableOpacity>
             <View style={styles.textContainer}>
               <Text style={styles.videoTitle} numberOfLines={2}>{item.title}</Text>
-              <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Channel', { channelName: item.channel, channelAvatar: item.avatar })}>
+              {/* নামের উপর চাপ দিলেও চ্যানেল লিংক (channelUrl) পাস হবে */}
+              <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Channel', { channelName: item.channel, channelAvatar: item.avatar, channelUrl: item.channelUrl })}>
                 <Text style={styles.videoMeta}>{item.channel} • {item.views} • {item.publishedTime}</Text>
               </TouchableOpacity>
             </View>
@@ -190,7 +198,7 @@ export default function SearchSettingScreen() {
 
     if (item.type === 'channel') {
       return (
-        <TouchableOpacity style={styles.channelRow} onPress={() => navigation.navigate('Channel', { channelName: item.title, channelAvatar: item.avatar })}>
+        <TouchableOpacity style={styles.channelRow} onPress={() => navigation.navigate('Channel', { channelName: item.title, channelAvatar: item.avatar, channelUrl: item.channelUrl })}>
           <Image source={{ uri: item.avatar }} style={styles.channelBigAvatar} />
           <View style={{ flex: 1, marginLeft: 15 }}>
             <Text style={styles.channelTitleMain}>{item.title}</Text>
@@ -234,7 +242,6 @@ export default function SearchSettingScreen() {
       ) : (
         <FlatList 
           data={searchResults} 
-          /* এখানে Main FlatList-এর keyExtractor ফিক্স করা হয়েছে */
           keyExtractor={(item, index) => item.id + '_' + index.toString()} 
           renderItem={renderItem} 
           onEndReached={handleLoadMore} 
