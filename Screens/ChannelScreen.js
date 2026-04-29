@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList, SafeAreaView, StatusBar, Dimensions, ActivityIndicator, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,7 +7,6 @@ import { DeviceEventEmitter } from 'react-native';
 import * as NavigationBar from 'expo-navigation-bar';
 
 const { width } = Dimensions.get('window');
-// আবার Desktop Agent-এ ফিরে যাওয়া হলো, কারণ ডেস্কটপের JSON স্ট্রাকচারেই ব্যানার এবং ভিডিও সুন্দরভাবে পাওয়া যায়।
 const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 // --- Helper Functions ---
@@ -35,6 +33,23 @@ const parseVid = (target, isShort, chName, chAvatar, quality) => ({
   isLive: JSON.stringify(target).includes('"BADGE_STYLE_TYPE_LIVE_NOW"')
 });
 
+// মাসের ভিত্তিতে গ্রুপ করার স্মার্ট লজিক
+const getGroupName = (timeString) => {
+  const t = (timeString || '').toLowerCase();
+  if (/(day|দিন|hour|ঘণ্টা|minute|মিনিট|week|সপ্তাহ|now|এখন|second|সেকেন্ড)/.test(t)) {
+    return 'চলতি মাসের ভিডিও';
+  }
+  const monthMatch = t.match(/(\d+|[১-৯]+)\s*(month|মাস)/);
+  if (monthMatch) {
+    return `${monthMatch[1]} মাস পূর্বের ভিডিও`;
+  }
+  const yearMatch = t.match(/(\d+|[১-৯]+)\s*(year|বছর)/);
+  if (yearMatch) {
+    return `${yearMatch[1]} বছর পূর্বের ভিডিও`;
+  }
+  return 'অন্যান্য ভিডিও';
+};
+
 export default function ChannelScreen() {
   const navigation = useNavigation();
   const route = useRoute();
@@ -50,7 +65,10 @@ export default function ChannelScreen() {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [channelInfo, setChannelInfo] = useState({ banner: null, subs: 'N/A', isLive: false, liveVid: null });
   const [thumbQuality, setThumbQuality] = useState('High');
-  const [tabData, setTabData] = useState({ Videos: [], Shorts: [], nextToken: null, apiKey: null, clientVer: '2.20240105.01.00' });
+  
+  const [videos, setVideos] = useState([]);
+  const [shorts, setShorts] = useState([]);
+  const [apiData, setApiData] = useState({ nextToken: null, apiKey: null, clientVer: '2.20240105.01.00' });
   const [expandedGroups, setExpandedGroups] = useState({});
 
   useEffect(() => { if (isFocused && Platform.OS === 'android') NavigationBar.setVisibilityAsync("hidden"); }, [isFocused]);
@@ -64,16 +82,16 @@ export default function ChannelScreen() {
     } catch (e) {}
   };
 
-  const extractNodes = (node, dataObj) => {
-    if (Array.isArray(node)) node.forEach(n => extractNodes(n, dataObj));
+  const extractNodes = (node, vids, shos, aData) => {
+    if (Array.isArray(node)) node.forEach(n => extractNodes(n, vids, shos, aData));
     else if (node && typeof node === 'object') {
       if (node.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) 
-        dataObj.nextToken = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
+        aData.nextToken = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
       
-      const vNode = node.videoRenderer || node.gridVideoRenderer || node.compactVideoRenderer;
-      if (vNode?.videoId) dataObj.Videos.push(parseVid(vNode, false, channelName, channelAvatar, thumbQuality));
-      else if (node.reelItemRenderer?.videoId) dataObj.Shorts.push(parseVid(node.reelItemRenderer, true, channelName, channelAvatar, thumbQuality));
-      else Object.values(node).forEach(n => extractNodes(n, dataObj));
+      const vNode = node.videoRenderer || node.gridVideoRenderer || node.compactVideoRenderer || node.richItemRenderer?.content?.videoRenderer;
+      if (vNode?.videoId) vids.push(parseVid(vNode, false, channelName, channelAvatar, thumbQuality));
+      else if (node.reelItemRenderer?.videoId) shos.push(parseVid(node.reelItemRenderer, true, channelName, channelAvatar, thumbQuality));
+      else Object.values(node).forEach(n => extractNodes(n, vids, shos, aData));
     }
   };
 
@@ -103,49 +121,64 @@ export default function ChannelScreen() {
       const apiKey = (vHtml.match(/"INNERTUBE_API_KEY":"([^"]+)"/) || [])[1];
       const clientVer = (vHtml.match(/"INNERTUBE_CLIENT_VERSION":"([^"]+)"/) || [])[1];
 
-      const newData = { Videos: [], Shorts: [], nextToken: null, apiKey, clientVer };
-      [extractYtData(vHtml), extractYtData(sHtml)].forEach(d => { if (d) extractNodes(d, newData); });
+      let tempVids = [], tempShorts = [], tempApi = { nextToken: null, apiKey, clientVer };
+      const vData = extractYtData(vHtml);
+      const sData = extractYtData(sHtml);
 
-      const uniqueVids = [...new Map(newData.Videos.map(v => [v.id, v])).values()];
+      if (vData) extractNodes(vData, tempVids, tempShorts, tempApi);
+      const vToken = tempApi.nextToken;
+      if (sData) extractNodes(sData, tempVids, tempShorts, tempApi);
+      tempApi.nextToken = vToken || tempApi.nextToken;
+
+      const uniqueVids = [...new Map(tempVids.map(v => [v.id, v])).values()];
+      const uniqueShorts = [...new Map(tempShorts.map(v => [v.id, v])).values()];
       const liveVid = uniqueVids.find(v => v.isLive);
       
-      setChannelInfo(prev => ({ ...prev, isLive: !!liveVid, liveVid }));
-      setTabData({ ...newData, Videos: uniqueVids });
+      setVideos(uniqueVids);
+      setShorts(uniqueShorts);
+      setApiData(tempApi);
 
-      const vData = extractYtData(vHtml);
       if (vData) {
         const header = vData.header?.c4TabbedHeaderRenderer || vData.header?.pageHeaderRenderer;
         
-        // ব্যানার লজিক ফিক্স করা হলো (Array Mutation এড়ানোর জন্য)
-        let bannerSources = header?.banner?.thumbnails || header?.pageHeaderBanner?.pageHeaderBannerImageViewModel?.image?.sources || header?.content?.pageHeaderViewModel?.banner?.imageBannerViewModel?.image?.sources;
         let bannerUrl = null;
-        if (bannerSources && bannerSources.length > 0) {
-          bannerUrl = bannerSources[bannerSources.length - 1].url;
-          if (bannerUrl && bannerUrl.startsWith('//')) bannerUrl = 'https:' + bannerUrl; // // দিয়ে শুরু হলে https যোগ করা
-        }
-        
-        const subs = header?.subscriberCountText?.simpleText || header?.content?.pageHeaderViewModel?.metadata?.metadataRows?.[1]?.metadataParts?.[0]?.text?.content || 'N/A';
-        setChannelInfo(prev => ({ ...prev, banner: bannerUrl, subs }));
+        const findBanner = (node) => {
+           if (bannerUrl) return;
+           if (node?.banner?.thumbnails) bannerUrl = node.banner.thumbnails.pop()?.url;
+           else if (node?.pageHeaderBannerImageViewModel?.image?.sources) bannerUrl = node.pageHeaderBannerImageViewModel.image.sources.pop()?.url;
+           else if (node?.imageBannerViewModel?.image?.sources) bannerUrl = node.imageBannerViewModel.image.sources.pop()?.url;
+           
+           if (node && typeof node === 'object') Object.values(node).forEach(child => findBanner(child));
+        };
+        findBanner(vData);
+
+        if (bannerUrl && bannerUrl.startsWith('//')) bannerUrl = 'https:' + bannerUrl;
+        const subs = header?.subscriberCountText?.simpleText || 'N/A';
+        setChannelInfo(prev => ({ ...prev, banner: bannerUrl, subs, isLive: !!liveVid, liveVid }));
       }
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
   const fetchMoreVideos = async () => {
-    if (isFetchingMore || !tabData.nextToken || !tabData.apiKey || activeTab !== 'Videos') return;
+    if (isFetchingMore || !apiData.nextToken || !apiData.apiKey || activeTab !== 'Videos') return;
     setIsFetchingMore(true);
     try {
-      const res = await fetch(`https://www.youtube.com/youtubei/v1/browse?key=${tabData.apiKey}`, {
+      const res = await fetch(`https://www.youtube.com/youtubei/v1/browse?key=${apiData.apiKey}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': DESKTOP_AGENT },
-        body: JSON.stringify({ context: { client: { clientName: 'WEB', clientVersion: tabData.clientVer } }, continuation: tabData.nextToken })
+        body: JSON.stringify({ context: { client: { clientName: 'WEB', clientVersion: apiData.clientVer } }, continuation: apiData.nextToken })
       });
       const data = await res.json();
-      const newData = { Videos: [], Shorts: [], nextToken: null };
-      (data.onResponseReceivedActions || []).forEach(a => extractNodes(a, newData));
+      
+      let newVids = [], newShorts = [], newApi = { ...apiData, nextToken: null };
+      (data.onResponseReceivedActions || []).forEach(a => extractNodes(a, newVids, newShorts, newApi));
 
-      setTabData(prev => {
-        const combined = [...prev.Videos, ...newData.Videos];
-        return { ...prev, Videos: [...new Map(combined.map(v => [v.id, v])).values()], nextToken: newData.nextToken || null };
-      });
+      if (newVids.length > 0) {
+        setVideos(prev => {
+          const combined = [...prev, ...newVids];
+          return [...new Map(combined.map(v => [v.id, v])).values()];
+        });
+      }
+      setApiData(prev => ({ ...prev, nextToken: newApi.nextToken }));
     } catch (e) { } finally { setIsFetchingMore(false); }
   };
 
@@ -157,23 +190,33 @@ export default function ChannelScreen() {
     await AsyncStorage.setItem('subscribedChannels', JSON.stringify(subs));
   };
 
+  // --- Dynamic Grouping Logic (Month by Month) ---
   const displayData = useMemo(() => {
-    if (activeTab === 'Shorts') return tabData.Shorts;
-    const groups = { 'This week video': [], 'This month video': [], 'This year video': [], 'Older videos': [] };
-    
-    tabData.Videos.forEach(v => {
-      const t = (v.publishedTime || '').toLowerCase();
-      if (/(day|দিন|hour|ঘণ্টা|minute|মিনিট|week|সপ্তাহ|now|এখন)/.test(t)) groups['This week video'].push(v);
-      else if (/(month|মাস)/.test(t)) groups['This month video'].push(v);
-      else if (/(1 year|১ বছর|1 বছর)/.test(t)) groups['This year video'].push(v);
-      else groups['Older videos'].push(v);
+    if (activeTab === 'Shorts') return shorts;
+
+    // ক্রমানুসারে আসা ভিডিওগুলোকে তাদের সময়ের নামে গ্রুপ করা হচ্ছে
+    const groupsMap = new Map();
+    videos.forEach(v => {
+      const groupName = getGroupName(v.publishedTime);
+      if (!groupsMap.has(groupName)) {
+        groupsMap.set(groupName, []);
+      }
+      groupsMap.get(groupName).push(v);
     });
 
-    return Object.entries(groups).flatMap(([title, vids]) => vids.length > 0 ? [
-      { isHeader: true, id: `header-${title}`, title, count: vids.length },
-      ...(expandedGroups[title] ? vids : vids.slice(0, title === 'This week video' ? 4 : 3)).map(v => ({ ...v, isListVideo: true }))
-    ] : []);
-  }, [tabData, activeTab, expandedGroups]);
+    let flatListReadyData = [];
+    for (let [groupName, vids] of groupsMap) {
+      flatListReadyData.push({ isHeader: true, id: `header-${groupName}`, title: groupName, count: vids.length });
+
+      // ফোল্ডার ওপেন থাকলে সব দেখাবে, না থাকলে মাত্র ৩টি দেখাবে
+      const isExpanded = expandedGroups[groupName];
+      const vidsToShow = isExpanded ? vids : vids.slice(0, 3);
+
+      vidsToShow.forEach(v => flatListReadyData.push({ ...v, isListVideo: true }));
+    }
+
+    return flatListReadyData;
+  }, [videos, shorts, activeTab, expandedGroups]);
 
   const renderItem = ({ item }) => {
     if (activeTab === 'Shorts') return (
@@ -183,12 +226,14 @@ export default function ChannelScreen() {
         <Text style={styles.shortTitle} numberOfLines={2}>{item.title}</Text>
       </TouchableOpacity>
     );
+
     if (item.isHeader) return (
       <TouchableOpacity style={styles.headerRow} activeOpacity={0.7} onPress={() => setExpandedGroups(p => ({ ...p, [item.title]: !p[item.title] }))}>
         <Text style={styles.headerTxt}>{item.title}</Text>
         <Text style={styles.headerCount}>{item.count} videos <Ionicons name={expandedGroups[item.title] ? "chevron-up" : "chevron-down"} size={16} /></Text>
       </TouchableOpacity>
     );
+    
     return (
       <View style={styles.vidList}>
         <TouchableOpacity style={styles.vidThumbWrap} activeOpacity={0.8} onPress={() => navigation.navigate('Player', { videoId: item.id, videoData: item })}>
@@ -214,8 +259,12 @@ export default function ChannelScreen() {
 
       <FlatList 
         key={activeTab} numColumns={activeTab === 'Shorts' ? 2 : 1} 
-        data={displayData} renderItem={renderItem} keyExtractor={(it, i) => it.id || String(i)} 
-        onEndReached={fetchMoreVideos} onEndReachedThreshold={0.5} showsVerticalScrollIndicator={false}
+        data={displayData} 
+        renderItem={renderItem} 
+        keyExtractor={(it, i) => it.id || String(i)} 
+        onEndReached={fetchMoreVideos} 
+        onEndReachedThreshold={0.5} 
+        showsVerticalScrollIndicator={false}
         ListFooterComponent={isFetchingMore ? <ActivityIndicator size="small" color="#F00" style={{ margin: 20 }} /> : null}
         ListHeaderComponent={() => (
           <View>
