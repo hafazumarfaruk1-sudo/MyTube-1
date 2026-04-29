@@ -23,7 +23,9 @@ export default function ChannelScreen() {
   const route = useRoute();
   const isFocused = useIsFocused();
 
-  const { videoId, channelData = {}, channelAvatar: paramAvatar } = route.params || {};
+  // হোমস্ক্রিন থেকে videoId বা channelName রিসিভ করা হচ্ছে
+  const { videoId, channelData = {}, channelName: paramName, channelAvatar: paramAvatar } = route.params || {};
+  const fallbackName = channelData?.channel || paramName || 'YouTube Channel';
   
   const [activeTab, setActiveTab] = useState('Videos');
   const [loading, setLoading] = useState(true);
@@ -36,7 +38,7 @@ export default function ChannelScreen() {
   const [hasMore, setHasMore] = useState(true);
 
   const [channelInfo, setChannelInfo] = useState({ 
-      name: channelData?.channel || 'YouTube Channel', 
+      name: fallbackName, 
       banner: null, 
       subs: 'N/A',
       avatar: channelData?.avatar || paramAvatar || 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg'
@@ -47,9 +49,9 @@ export default function ChannelScreen() {
   useEffect(() => { if (isFocused && Platform.OS === 'android') NavigationBar.setVisibilityAsync("hidden"); }, [isFocused]);
   
   useEffect(() => { 
-      if(videoId) fetchInitialData(); 
+      fetchInitialData(); 
       loadGlobals(); 
-  }, [videoId]);
+  }, [videoId, fallbackName]);
 
   const loadGlobals = async () => {
     try {
@@ -58,20 +60,22 @@ export default function ChannelScreen() {
     } catch (e) {}
   };
 
-  // ✅ প্রথম পেজের ১০টি ভিডিও আনা
+  // ✅ প্রথম পেজের ১০টি ভিডিও আনা (videoId বা Name দিয়ে)
   const fetchInitialData = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${MY_SERVER_URL}/api/channel-by-video?videoId=${encodeURIComponent(videoId)}&page=1`);
+      // যদি videoId থাকে তবে সেটি পাঠাবে, না থাকলে Name পাঠাবে
+      const queryParam = videoId ? `videoId=${encodeURIComponent(videoId)}` : `name=${encodeURIComponent(fallbackName)}`;
+      const response = await fetch(`${MY_SERVER_URL}/api/channel-data-fast?${queryParam}&page=1`);
       const data = await response.json();
 
       if (data.success) {
         if (data.videos) {
             setVideos(data.videos);
-            setHasMore(data.videos.length >= 10); // ১০টি ভিডিও আসলে বুঝবে আরও আছে
+            setHasMore(data.videos.length >= 10);
         }
         setFetchedChannelUrl(data.channelUrl);
-        setPage(2); // পরবর্তী রিকোয়েস্টের জন্য পেজ ২ সেট করা হলো
+        setPage(2); 
 
         setChannelInfo(prev => ({ 
             ...prev,
@@ -89,18 +93,21 @@ export default function ChannelScreen() {
 
   // ✅ স্ক্রল করলে পরের ১০টি ভিডিও আনা
   const fetchMoreVideos = async () => {
-      // যদি ভিডিও শেষ হয়ে যায় বা লোড হতে থাকে, তবে রিকোয়েস্ট করবে না
       if (isFetchingMore || !hasMore || !fetchedChannelUrl) return;
 
       setIsFetchingMore(true);
       try {
-        const response = await fetch(`${MY_SERVER_URL}/api/channel-by-video?channelUrl=${encodeURIComponent(fetchedChannelUrl)}&page=${page}`);
+        const response = await fetch(`${MY_SERVER_URL}/api/channel-data-fast?channelUrl=${encodeURIComponent(fetchedChannelUrl)}&page=${page}`);
         const data = await response.json();
 
         if (data.success && data.videos) {
-            setVideos(prev => [...prev, ...data.videos]); // আগের ভিডিওর সাথে নতুনগুলো যুক্ত করা
+            setVideos(prev => {
+                const combined = [...prev, ...data.videos];
+                // ডুপ্লিকেট ভিডিও রিমুভ করা
+                return [...new Map(combined.map(v => [v.id, v])).values()];
+            });
             setHasMore(data.videos.length >= 10);
-            setPage(prev => prev + 1); // পেজ ৩, ৪, ৫ এভাবে বাড়তে থাকবে
+            setPage(prev => prev + 1);
         }
       } catch (error) {
         console.error("Load More Error: ", error);
@@ -181,7 +188,6 @@ export default function ChannelScreen() {
         windowSize={5}
         removeClippedSubviews={true}
         
-        // 🚀 নিচে স্ক্রল করলেই পরের ১০টি ভিডিও আসবে
         onEndReached={fetchMoreVideos}
         onEndReachedThreshold={0.5}
         ListFooterComponent={isFetchingMore ? <ActivityIndicator size="small" color="#F00" style={{ margin: 20 }} /> : null}
