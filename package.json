@@ -30,6 +30,7 @@
     "expo-media-library": "~18.2.1",
     "expo-file-system": "~55.0.17",
     "expo-notifications": "~0.32.16"
+    "@react-native-community/slider": "^4.5.0"
   },
   "private": true,
   "name": "BioDigital-Player",
