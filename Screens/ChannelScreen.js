@@ -7,7 +7,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DeviceEventEmitter } from 'react-native'; 
 
 const { width } = Dimensions.get('window');
-const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+// নতুন হেডার: Consent block এড়ানোর জন্য কুকি এবং ল্যাঙ্গুয়েজ অ্যাড করা হয়েছে
+const HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Cookie': 'CONSENT=YES+cb;' 
+};
 
 export default function ChannelScreen() {
   const navigation = useNavigation();
@@ -53,7 +59,6 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // Memory Crash এড়ানোর জন্য Iterative সার্চিং লজিক (আপডেট করা হয়েছে)
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
     const stack = [rootNode];
 
@@ -70,7 +75,6 @@ export default function ChannelScreen() {
           categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
         }
 
-        // ছোট চ্যানেলের জন্য compactVideoRenderer এবং playlistVideoRenderer যোগ করা হয়েছে
         const target = node.videoRenderer || node.gridVideoRenderer || node.compactVideoRenderer || node.playlistVideoRenderer;
 
         if (target && target.videoId) {
@@ -114,56 +118,72 @@ export default function ChannelScreen() {
     }
   };
 
-  // সব ধরনের Initial Data ক্যাচ করার জন্য উন্নত Regex
-  const matchInitialData = (html) => {
-    return html.match(/ytInitialData\s*=\s*({.+?});/) || 
-           html.match(/window\["ytInitialData"\]\s*=\s*({.+?});/) ||
-           html.match(/var ytInitialData\s*=\s*({.+?});/);
+  // 100% নির্ভরযোগ্য JSON এক্সট্র্যাক্টর
+  const extractYtData = (html) => {
+    try {
+      let jsonStr = html.split('var ytInitialData =')[1] || html.split('window["ytInitialData"] =')[1];
+      if (!jsonStr) return null;
+      jsonStr = jsonStr.split(';</script>')[0].trim();
+      return JSON.parse(jsonStr);
+    } catch (e) {
+      try {
+        const match = html.match(/ytInitialData\s*=\s*({.+?});/);
+        if (match && match[1]) return JSON.parse(match[1]);
+      } catch(err) {}
+    }
+    return null;
   };
 
   const fetchChannelData = async () => {
     setLoading(true);
     try {
       let extractedChannelUrl = paramChannelUrl || channelData?.channelUrl || null;
-
-      if (!extractedChannelUrl) {
-          const searchResponse = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(channelName)}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
-          const searchHtml = await searchResponse.text();
-          let searchMatch = matchInitialData(searchHtml);
-
-          if (searchMatch && searchMatch[1]) {
-            try {
-              const searchData = JSON.parse(searchMatch[1]);
-              const findChannelUrl = (node) => {
-                if (extractedChannelUrl) return; 
-                if (node?.channelRenderer?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url) {
-                   extractedChannelUrl = node.channelRenderer.navigationEndpoint.commandMetadata.webCommandMetadata.url;
-                   return;
-                }
-                if (node?.videoRenderer?.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url) {
-                   extractedChannelUrl = node.videoRenderer.ownerText.runs[0].navigationEndpoint.commandMetadata.webCommandMetadata.url;
-                   return;
-                }
-                if (node && typeof node === 'object') {
-                  Object.values(node).forEach(child => findChannelUrl(child));
-                }
-              };
-              findChannelUrl(searchData);
-            } catch (err) {}
+      
+      // ডাবল URL সমস্যা সমাধানের জন্য URL ক্লিনআপ
+      let cleanPath = extractedChannelUrl;
+      if (extractedChannelUrl && extractedChannelUrl.includes('youtube.com')) {
+          try {
+              cleanPath = new URL(extractedChannelUrl).pathname;
+          } catch(e) {
+              cleanPath = extractedChannelUrl.split('youtube.com')[1];
           }
       }
 
-      if (!extractedChannelUrl) {
+      if (!cleanPath) {
+          const searchResponse = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(channelName)}`, { headers: HEADERS });
+          const searchHtml = await searchResponse.text();
+          const searchData = extractYtData(searchHtml);
+
+          if (searchData) {
+            const findChannelUrl = (node) => {
+              if (cleanPath) return; 
+              if (node?.channelRenderer?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url) {
+                 cleanPath = node.channelRenderer.navigationEndpoint.commandMetadata.webCommandMetadata.url;
+                 return;
+              }
+              if (node?.videoRenderer?.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url) {
+                 cleanPath = node.videoRenderer.ownerText.runs[0].navigationEndpoint.commandMetadata.webCommandMetadata.url;
+                 return;
+              }
+              if (node && typeof node === 'object') {
+                Object.values(node).forEach(child => findChannelUrl(child));
+              }
+            };
+            findChannelUrl(searchData);
+          }
+      }
+
+      if (!cleanPath) {
         setLoading(false);
         return; 
       }
 
-      let targetVideosUrl = `https://www.youtube.com${extractedChannelUrl}/videos`;
-      let targetShortsUrl = `https://www.youtube.com${extractedChannelUrl}/shorts`;
+      let targetVideosUrl = `https://www.youtube.com${cleanPath}/videos`;
+      let targetShortsUrl = `https://www.youtube.com${cleanPath}/shorts`;
 
       const [videosRes, shortsRes] = await Promise.all([
-        fetch(targetVideosUrl, { headers: { 'User-Agent': DESKTOP_AGENT } }),
-        fetch(targetShortsUrl, { headers: { 'User-Agent': DESKTOP_AGENT } })
+        fetch(targetVideosUrl, { headers: HEADERS }),
+        fetch(targetShortsUrl, { headers: HEADERS })
       ]);
 
       const videosHtml = await videosRes.text();
@@ -174,41 +194,32 @@ export default function ChannelScreen() {
           setApiKey(apiMatch[1]);
       }
 
-      let videosMatch = matchInitialData(videosHtml);
-      let shortsMatch = matchInitialData(shortsHtml);
+      let parsedVideosData = extractYtData(videosHtml);
+      let parsedShortsData = extractYtData(shortsHtml);
 
       const categorizedData = { Videos: [], Shorts: [], VideosToken: null, ShortsToken: null };
 
-      const processMatch = (match, tabType) => {
-        if (match && match[1]) {
-          try {
-            const parsedData = JSON.parse(match[1]);
-            extractDataIteratively(parsedData, categorizedData, tabType);
-            return parsedData;
-          } catch (error) { return null; }
-        }
-        return null;
-      };
+      if (parsedVideosData) extractDataIteratively(parsedVideosData, categorizedData, 'Videos');
+      if (parsedShortsData) extractDataIteratively(parsedShortsData, categorizedData, 'Shorts');
 
-      let parsedVideosData = processMatch(videosMatch, 'Videos');
-      processMatch(shortsMatch, 'Shorts');
-
-      // ছোট চ্যানেলের জন্য Fallback: যদি /videos ট্যাবে ভিডিও না থাকে, তবে মূল চ্যানেল পেজ স্ক্যান করা হবে
+      // যদি /videos ট্যাবে ডেটা না আসে, রুট পেজে ফলব্যাক
       if (categorizedData.Videos.length === 0) {
           try {
-              const homeRes = await fetch(`https://www.youtube.com${extractedChannelUrl}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
+              const homeRes = await fetch(`https://www.youtube.com${cleanPath}`, { headers: HEADERS });
               const homeHtml = await homeRes.text();
-              const homeMatch = matchInitialData(homeHtml);
-              const parsedHomeData = processMatch(homeMatch, 'Videos');
-              if (!parsedVideosData) parsedVideosData = parsedHomeData; 
+              const parsedHomeData = extractYtData(homeHtml);
+              if (parsedHomeData) {
+                  extractDataIteratively(parsedHomeData, categorizedData, 'Videos');
+                  if (!parsedVideosData) parsedVideosData = parsedHomeData; 
+              }
           } catch(e) {}
       }
 
       categorizedData.Videos = categorizedData.Videos.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
       categorizedData.Shorts = categorizedData.Shorts.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
 
-      setVideoToken(categorizedData.VideosToken);
-      setShortToken(categorizedData.ShortsToken);
+      setVideoToken(categorizedData.VideosToken || null);
+      setShortToken(categorizedData.ShortsToken || null);
 
       const currentLiveVideo = categorizedData.Videos.find(v => v.isLive);
       if (currentLiveVideo) {
@@ -243,7 +254,7 @@ export default function ChannelScreen() {
     try {
       const response = await fetch(`https://www.youtube.com/youtubei/v1/browse?key=${apiKey}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'User-Agent': DESKTOP_AGENT },
+        headers: { 'Content-Type': 'application/json', ...HEADERS },
         body: JSON.stringify({
           context: { client: { clientName: 'WEB', clientVersion: '2.20231214.00.00' } },
           continuation: currentToken
