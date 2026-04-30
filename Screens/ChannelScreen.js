@@ -7,8 +7,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DeviceEventEmitter } from 'react-native'; 
 
 const { width } = Dimensions.get('window');
-
-// নতুন হেডার: Consent block এড়ানোর জন্য কুকি এবং ল্যাঙ্গুয়েজ অ্যাড করা হয়েছে
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   'Accept-Language': 'en-US,en;q=0.9',
@@ -59,6 +57,33 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
+  // থাম্বনেইল ফিক্স করার জন্য ১০০% নিরাপদ ফাংশন
+  const getSafeImageUrl = (thumbnailsArray, fallbackVideoId = null, isShort = false) => {
+    let finalUrl = '';
+    if (thumbnailsArray && Array.isArray(thumbnailsArray) && thumbnailsArray.length > 0) {
+      // Data Saver হলে ছোট সাইজের ছবি নেবে, না হলে সবচেয়ে ক্লিয়ার ছবিটা নেবে
+      const index = thumbQuality === 'Data Saver' ? 0 : thumbnailsArray.length - 1;
+      finalUrl = thumbnailsArray[index]?.url || thumbnailsArray[0]?.url;
+    }
+
+    // যদি JSON থেকে ছবি না আসে, তখন ব্যাকআপ হিসেবে ডিফল্ট ইউআরএল ব্যবহার করবে
+    if (!finalUrl && fallbackVideoId) {
+      finalUrl = isShort 
+        ? `https://i.ytimg.com/vi/${fallbackVideoId}/oardefault.jpg` 
+        : `https://i.ytimg.com/vi/${fallbackVideoId}/hqdefault.jpg`;
+    }
+
+    // React Native এর <Image> ক্র্যাশ রোধ করার জন্য প্রোটোকল ফিক্স
+    if (finalUrl && finalUrl.startsWith('//')) {
+      return `https:${finalUrl}`;
+    }
+    if (finalUrl && finalUrl.startsWith('/')) {
+      return `https://www.youtube.com${finalUrl}`;
+    }
+
+    return finalUrl || 'https://via.placeholder.com/640x360.png?text=No+Thumbnail'; 
+  };
+
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
     const stack = [rootNode];
 
@@ -85,9 +110,8 @@ export default function ChannelScreen() {
           const isLive = JSON.stringify(target).includes('"BADGE_STYLE_TYPE_LIVE_NOW"');
           const videoId = target.videoId;
 
-          const thumbnailUrl = thumbQuality === 'Data Saver' 
-              ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` 
-              : `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+          // নতুন ফাংশন ব্যবহার করে থাম্বনেইল আনা হচ্ছে
+          const thumbnailUrl = getSafeImageUrl(target.thumbnail?.thumbnails, videoId, false);
 
           categorizedData.Videos.push({
             id: String(videoId), title: String(title), views: String(views),
@@ -100,9 +124,8 @@ export default function ChannelScreen() {
           const views = node.reelItemRenderer.viewCountText?.simpleText || 'N/A';
           const videoId = node.reelItemRenderer.videoId;
 
-          const shortThumbnailUrl = thumbQuality === 'Data Saver' 
-              ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` 
-              : `https://i.ytimg.com/vi/${videoId}/oardefault.jpg`;
+          // নতুন ফাংশন ব্যবহার করে শর্টসের থাম্বনেইল আনা হচ্ছে
+          const shortThumbnailUrl = getSafeImageUrl(node.reelItemRenderer.thumbnail?.thumbnails, videoId, true);
 
           categorizedData.Shorts.push({
             id: String(videoId), title: String(title), views: String(views),
@@ -118,7 +141,6 @@ export default function ChannelScreen() {
     }
   };
 
-  // 100% নির্ভরযোগ্য JSON এক্সট্র্যাক্টর
   const extractYtData = (html) => {
     try {
       let jsonStr = html.split('var ytInitialData =')[1] || html.split('window["ytInitialData"] =')[1];
@@ -139,7 +161,6 @@ export default function ChannelScreen() {
     try {
       let extractedChannelUrl = paramChannelUrl || channelData?.channelUrl || null;
       
-      // ডাবল URL সমস্যা সমাধানের জন্য URL ক্লিনআপ
       let cleanPath = extractedChannelUrl;
       if (extractedChannelUrl && extractedChannelUrl.includes('youtube.com')) {
           try {
@@ -202,7 +223,6 @@ export default function ChannelScreen() {
       if (parsedVideosData) extractDataIteratively(parsedVideosData, categorizedData, 'Videos');
       if (parsedShortsData) extractDataIteratively(parsedShortsData, categorizedData, 'Shorts');
 
-      // যদি /videos ট্যাবে ডেটা না আসে, রুট পেজে ফলব্যাক
       if (categorizedData.Videos.length === 0) {
           try {
               const homeRes = await fetch(`https://www.youtube.com${cleanPath}`, { headers: HEADERS });
@@ -234,10 +254,11 @@ export default function ChannelScreen() {
 
       if (parsedVideosData) {
         const header = parsedVideosData?.header?.c4TabbedHeaderRenderer || parsedVideosData?.header?.pageHeaderRenderer;
-        let bannerSrc = null;
-        if (header?.banner?.thumbnails) bannerSrc = header.banner.thumbnails;
-        else if (header?.pageHeaderBanner?.pageHeaderBannerImageViewModel?.image?.sources) bannerSrc = header.pageHeaderBanner.pageHeaderBannerImageViewModel.image.sources;
-        if (bannerSrc && bannerSrc.length > 0) setChannelBanner(bannerSrc[bannerSrc.length - 1].url);
+        
+        // ব্যানার এবং লোগোতেও একই ফিক্স দেওয়া হয়েছে
+        let bannerSrcArray = header?.banner?.thumbnails || header?.pageHeaderBanner?.pageHeaderBannerImageViewModel?.image?.sources;
+        let finalBanner = getSafeImageUrl(bannerSrcArray);
+        if (finalBanner && !finalBanner.includes('placeholder')) setChannelBanner(finalBanner);
 
         const subs = header?.subscriberCountText?.simpleText || header?.content?.pageHeaderViewModel?.metadata?.metadataRows?.[0]?.metadataParts?.[0]?.text?.content;
         if (subs) setSubscriberCount(subs);
@@ -465,3 +486,4 @@ const styles = StyleSheet.create({
   emptyStateContainer: { padding: 40, alignItems: 'center', justifyContent: 'center' },
   emptyStateText: { color: '#AAA', fontSize: 16, fontWeight: '500' }
 });
+```</Image>
