@@ -45,7 +45,7 @@ export default function ChannelScreen() {
   const [videoToken, setVideoToken] = useState(null);
   const [shortToken, setShortToken] = useState(null);
   const [apiKey, setApiKey] = useState(null);
-  const [isMobileMode, setIsMobileMode] = useState(false); // ট্র্যাক করার জন্য যে ডেটা মোবাইল থেকে এসেছে কি না
+  const [isMobileMode, setIsMobileMode] = useState(false); 
 
   useEffect(() => {
     console.log(`\n========== [CHANNEL SCREEN MOUNTED] ==========`);
@@ -217,7 +217,7 @@ export default function ChannelScreen() {
       if (parsedVideosData) extractDataIteratively(parsedVideosData, categorizedData, 'Videos');
       if (parsedShortsData) extractDataIteratively(parsedShortsData, categorizedData, 'Shorts');
 
-      // 🔥 MOBILE FALLBACK STRATEGY (যদি ডেস্কটপে ভিডিও না পাওয়া যায়) 🔥
+      // 🔥 MOBILE FALLBACK STRATEGY 🔥
       if (categorizedData.Videos.length === 0 && categorizedData.Shorts.length === 0) {
           console.log(`[Mobile Fallback] Desktop failed (0 videos). Trying Mobile API at m.youtube.com...`);
           try {
@@ -234,7 +234,7 @@ export default function ChannelScreen() {
           } catch(e) { console.error(`[Mobile Fallback Error]:`, e); }
       }
 
-      // যদি /videos বা মোবাইলেও কিছু না থাকে, তবে মূল চ্যানেল পেজে ট্রাই করবে
+      // HOME FALLBACK
       if (categorizedData.Videos.length === 0) {
           console.log(`[Home Fallback] Fetching root channel page...`);
           try {
@@ -393,6 +393,7 @@ export default function ChannelScreen() {
     return <View style={{ paddingVertical: 20 }}><ActivityIndicator size="large" color="#FF0000" /></View>;
   };
 
+  // ✅ এখানেই সেই ফিক্স করা সঠিক ChannelHeader আছে
   const ChannelHeader = () => (
     <View>
       <Image source={{ uri: channelBanner }} style={styles.bannerImage} />
@@ -407,7 +408,7 @@ export default function ChannelScreen() {
             }
           }}
         >
-           <Image source={{ uri: channelAvatar }} style={styles.channelLogoLarge} />
+              <Image source={{ uri: channelAvatar }} style={styles.channelLogoLarge} />
            {isLiveChannel && (
              <View style={styles.liveBadge}>
                <Text style={styles.liveBadgeText}>LIVE</Text>
@@ -424,7 +425,19 @@ export default function ChannelScreen() {
       <View style={styles.actionButtonsContainer}>
         <TouchableOpacity style={[styles.subscribeBtn, isSubscribed ? styles.subscribedState : styles.unsubscribedState]} onPress={handleSubscriptionToggle} activeOpacity={0.8}>
           <Ionicons name={isSubscribed ? "notifications-outline" : "notifications"} size={18} color={isSubscribed ? "#FFF" : "#0F0F0F"} />
-         <Text style={[styles.tabText, activeTab === item && styles.activeTabText]}>{item}</Text>
+          <Text style={[styles.subscribeText, isSubscribed ? {color: '#FFF'} : {color: '#0F0F0F'}]}>{isSubscribed ? 'Subscribed' : 'Subscribe'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.tabScrollContainer}>
+        <FlatList 
+          horizontal={true} 
+          showsHorizontalScrollIndicator={false} 
+          data={['Videos', 'Shorts']} 
+          keyExtractor={(item) => item} 
+          renderItem={({ item }) => (
+            <TouchableOpacity style={[styles.tabButton, activeTab === item && styles.activeTabButton]} onPress={() => setActiveTab(item)}>
+              <Text style={[styles.tabText, activeTab === item && styles.activeTabText]}>{item}</Text>
             </TouchableOpacity>
           )}
         />
