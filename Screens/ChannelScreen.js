@@ -7,7 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DeviceEventEmitter } from 'react-native'; 
 
 const { width } = Dimensions.get('window');
-const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 export default function ChannelScreen() {
   const navigation = useNavigation();
@@ -53,29 +53,33 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
+  // Memory Crash এড়ানোর জন্য Iterative সার্চিং লজিক (আপডেট করা হয়েছে)
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
     const stack = [rootNode];
+
     while (stack.length > 0) {
       const node = stack.pop();
+
       if (Array.isArray(node)) {
         for (let i = 0; i < node.length; i++) {
           if (node[i] && typeof node[i] === 'object') stack.push(node[i]);
         }
       } else if (node && typeof node === 'object') {
+
         if (node.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) {
           categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
         }
 
-        if (node.videoRenderer || node.gridVideoRenderer) {
-          const target = node.videoRenderer || node.gridVideoRenderer;
-          const videoId = target.videoId;
-          if(!videoId) continue;
+        // ছোট চ্যানেলের জন্য compactVideoRenderer এবং playlistVideoRenderer যোগ করা হয়েছে
+        const target = node.videoRenderer || node.gridVideoRenderer || node.compactVideoRenderer || node.playlistVideoRenderer;
 
-          const duration = target.lengthText?.simpleText || '';
-          const publishedTime = target.publishedTimeText?.simpleText || ''; 
+        if (target && target.videoId) {
+          const duration = target.lengthText?.simpleText || target.lengthText?.runs?.[0]?.text || '';
+          const publishedTime = target.publishedTimeText?.simpleText || target.publishedTimeText?.runs?.[0]?.text || ''; 
           const title = target.title?.runs?.[0]?.text || target.title?.simpleText || 'No Title';
-          const views = target.shortViewCountText?.simpleText || target.viewCountText?.simpleText || '';
+          const views = target.shortViewCountText?.simpleText || target.viewCountText?.simpleText || target.videoInfo?.runs?.[0]?.text || '';
           const isLive = JSON.stringify(target).includes('"BADGE_STYLE_TYPE_LIVE_NOW"');
+          const videoId = target.videoId;
 
           const thumbnailUrl = thumbQuality === 'Data Saver' 
               ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` 
@@ -86,12 +90,12 @@ export default function ChannelScreen() {
             publishedTime: String(publishedTime), duration: String(duration),
             thumbnail: thumbnailUrl, channel: channelName, avatar: channelAvatar, isLive: isLive
           });
-        } else if (node.reelItemRenderer) {
-          const videoId = node.reelItemRenderer.videoId;
-          if(!videoId) continue;
 
-          const title = node.reelItemRenderer.headline?.simpleText || 'Short Video';
+        } else if (node.reelItemRenderer && node.reelItemRenderer.videoId) {
+          const title = node.reelItemRenderer.headline?.simpleText || node.reelItemRenderer.title?.simpleText || 'Short Video';
           const views = node.reelItemRenderer.viewCountText?.simpleText || 'N/A';
+          const videoId = node.reelItemRenderer.videoId;
+
           const shortThumbnailUrl = thumbQuality === 'Data Saver' 
               ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` 
               : `https://i.ytimg.com/vi/${videoId}/oardefault.jpg`;
@@ -101,100 +105,135 @@ export default function ChannelScreen() {
             thumbnail: shortThumbnailUrl, channel: channelName, avatar: channelAvatar, duration: 'Short'
           });
         } else {
-          Object.values(node).forEach(val => {
-            if (val && typeof val === 'object') stack.push(val);
-          });
+          const values = Object.values(node);
+          for (let i = 0; i < values.length; i++) {
+            if (values[i] && typeof values[i] === 'object') stack.push(values[i]);
+          }
         }
       }
     }
+  };
+
+  // সব ধরনের Initial Data ক্যাচ করার জন্য উন্নত Regex
+  const matchInitialData = (html) => {
+    return html.match(/ytInitialData\s*=\s*({.+?});/) || 
+           html.match(/window\["ytInitialData"\]\s*=\s*({.+?});/) ||
+           html.match(/var ytInitialData\s*=\s*({.+?});/);
   };
 
   const fetchChannelData = async () => {
     setLoading(true);
     try {
-      let extractedUrl = paramChannelUrl || channelData?.channelUrl;
+      let extractedChannelUrl = paramChannelUrl || channelData?.channelUrl || null;
 
-      // যদি URL না থাকে তবে আরও নিখুঁতভাবে সার্চ করার লজিক
-      if (!extractedUrl) {
-        const searchRes = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(channelName)}&sp=EgIQAg%253D%253D`, { headers: { 'User-Agent': DESKTOP_AGENT } });
-        const html = await searchRes.text();
-        const match = html.match(/ytInitialData\s*=\s*({.+?});/);
-        if (match) {
-          const data = JSON.parse(match[1]);
-          // চ্যানেলের সঠিক URL খোঁজার উন্নত লজিক
-          const findUrl = (obj) => {
-            if (extractedUrl) return;
-            if (obj?.channelRenderer?.navigationEndpoint?.browseEndpoint?.browseId) {
-                extractedUrl = `/channel/${obj.channelRenderer.navigationEndpoint.browseEndpoint.browseId}`;
-                return;
-            }
-            if (obj && typeof obj === 'object') {
-                Object.values(obj).forEach(v => findUrl(v));
-            }
-          };
-          findUrl(data);
-        }
+      if (!extractedChannelUrl) {
+          const searchResponse = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(channelName)}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
+          const searchHtml = await searchResponse.text();
+          let searchMatch = matchInitialData(searchHtml);
+
+          if (searchMatch && searchMatch[1]) {
+            try {
+              const searchData = JSON.parse(searchMatch[1]);
+              const findChannelUrl = (node) => {
+                if (extractedChannelUrl) return; 
+                if (node?.channelRenderer?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url) {
+                   extractedChannelUrl = node.channelRenderer.navigationEndpoint.commandMetadata.webCommandMetadata.url;
+                   return;
+                }
+                if (node?.videoRenderer?.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url) {
+                   extractedChannelUrl = node.videoRenderer.ownerText.runs[0].navigationEndpoint.commandMetadata.webCommandMetadata.url;
+                   return;
+                }
+                if (node && typeof node === 'object') {
+                  Object.values(node).forEach(child => findChannelUrl(child));
+                }
+              };
+              findChannelUrl(searchData);
+            } catch (err) {}
+          }
       }
 
-      if (!extractedUrl) {
-          // যদি তাও না পাওয়া যায় তবে হ্যান্ডেল ফরমেট ট্রাই করা
-          extractedUrl = `/@${channelName.replace(/\s+/g, '')}`;
+      if (!extractedChannelUrl) {
+        setLoading(false);
+        return; 
       }
 
-      const cleanUrl = extractedUrl.startsWith('/') ? extractedUrl : `/${extractedUrl}`;
-      
-      const [vRes, sRes] = await Promise.all([
-        fetch(`https://www.youtube.com${cleanUrl}/videos`, { headers: { 'User-Agent': DESKTOP_AGENT } }),
-        fetch(`https://www.youtube.com${cleanUrl}/shorts`, { headers: { 'User-Agent': DESKTOP_AGENT } })
+      let targetVideosUrl = `https://www.youtube.com${extractedChannelUrl}/videos`;
+      let targetShortsUrl = `https://www.youtube.com${extractedChannelUrl}/shorts`;
+
+      const [videosRes, shortsRes] = await Promise.all([
+        fetch(targetVideosUrl, { headers: { 'User-Agent': DESKTOP_AGENT } }),
+        fetch(targetShortsUrl, { headers: { 'User-Agent': DESKTOP_AGENT } })
       ]);
 
-      const vHtml = await vRes.text();
-      const sHtml = await sRes.text();
+      const videosHtml = await videosRes.text();
+      const shortsHtml = await shortsRes.text();
 
-      const apiKeyMatch = vHtml.match(/"INNERTUBE_API_KEY":"(.*?)"/);
-      if (apiKeyMatch) setApiKey(apiKeyMatch[1]);
+      const apiMatch = videosHtml.match(/"INNERTUBE_API_KEY":"(.*?)"/);
+      if (apiMatch && apiMatch[1]) {
+          setApiKey(apiMatch[1]);
+      }
+
+      let videosMatch = matchInitialData(videosHtml);
+      let shortsMatch = matchInitialData(shortsHtml);
 
       const categorizedData = { Videos: [], Shorts: [], VideosToken: null, ShortsToken: null };
-      
-      const parseAndExtract = (html, type) => {
-        const match = html.match(/ytInitialData\s*=\s*({.+?});/);
-        if (match) {
-          const parsed = JSON.parse(match[1]);
-          extractDataIteratively(parsed, categorizedData, type);
-          return parsed;
+
+      const processMatch = (match, tabType) => {
+        if (match && match[1]) {
+          try {
+            const parsedData = JSON.parse(match[1]);
+            extractDataIteratively(parsedData, categorizedData, tabType);
+            return parsedData;
+          } catch (error) { return null; }
         }
         return null;
       };
 
-      const vData = parseAndExtract(vHtml, 'Videos');
-      parseAndExtract(sHtml, 'Shorts');
+      let parsedVideosData = processMatch(videosMatch, 'Videos');
+      processMatch(shortsMatch, 'Shorts');
 
-      // UI Update
-      setTabData({
-        Videos: categorizedData.Videos.filter((v, i, a) => a.findIndex(t => t.id === v.id) === i),
-        Shorts: categorizedData.Shorts.filter((v, i, a) => a.findIndex(t => t.id === v.id) === i)
-      });
+      // ছোট চ্যানেলের জন্য Fallback: যদি /videos ট্যাবে ভিডিও না থাকে, তবে মূল চ্যানেল পেজ স্ক্যান করা হবে
+      if (categorizedData.Videos.length === 0) {
+          try {
+              const homeRes = await fetch(`https://www.youtube.com${extractedChannelUrl}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
+              const homeHtml = await homeRes.text();
+              const homeMatch = matchInitialData(homeHtml);
+              const parsedHomeData = processMatch(homeMatch, 'Videos');
+              if (!parsedVideosData) parsedVideosData = parsedHomeData; 
+          } catch(e) {}
+      }
+
+      categorizedData.Videos = categorizedData.Videos.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
+      categorizedData.Shorts = categorizedData.Shorts.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
+
       setVideoToken(categorizedData.VideosToken);
       setShortToken(categorizedData.ShortsToken);
 
-      if (vData) {
-        const header = vData.header?.c4TabbedHeaderRenderer || vData.header?.pageHeaderRenderer;
-        const banner = vData.header?.c4TabbedHeaderRenderer?.banner?.thumbnails;
-        if (banner) setChannelBanner(banner[banner.length - 1].url);
-        
-        const subs = vData.header?.c4TabbedHeaderRenderer?.subscriberCountText?.simpleText;
+      const currentLiveVideo = categorizedData.Videos.find(v => v.isLive);
+      if (currentLiveVideo) {
+         setIsLiveChannel(true);
+         setLiveVideoData(currentLiveVideo);
+      } else {
+         setIsLiveChannel(false);
+         setLiveVideoData(null);
+      }
+
+      setTabData({ Videos: categorizedData.Videos, Shorts: categorizedData.Shorts });
+
+      if (parsedVideosData) {
+        const header = parsedVideosData?.header?.c4TabbedHeaderRenderer || parsedVideosData?.header?.pageHeaderRenderer;
+        let bannerSrc = null;
+        if (header?.banner?.thumbnails) bannerSrc = header.banner.thumbnails;
+        else if (header?.pageHeaderBanner?.pageHeaderBannerImageViewModel?.image?.sources) bannerSrc = header.pageHeaderBanner.pageHeaderBannerImageViewModel.image.sources;
+        if (bannerSrc && bannerSrc.length > 0) setChannelBanner(bannerSrc[bannerSrc.length - 1].url);
+
+        const subs = header?.subscriberCountText?.simpleText || header?.content?.pageHeaderViewModel?.metadata?.metadataRows?.[0]?.metadataParts?.[0]?.text?.content;
         if (subs) setSubscriberCount(subs);
       }
 
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+    } catch (error) {} finally { setLoading(false); }
   };
-
-  // ... বাকি ফাংশনগুলো (fetchMoreData, handleVideoPress, renderItem, ইত্যাদি) আপনার আগের কোডের মতোই থাকবে।
-  // কোড ছোট রাখার জন্য নিচে শুধু return অংশটি দেওয়া হলো।
 
   const fetchMoreData = async () => {
     const currentToken = activeTab === 'Videos' ? videoToken : shortToken;
@@ -206,20 +245,23 @@ export default function ChannelScreen() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'User-Agent': DESKTOP_AGENT },
         body: JSON.stringify({
-          context: { client: { clientName: 'WEB', clientVersion: '2.20240320.01.00' } },
+          context: { client: { clientName: 'WEB', clientVersion: '2.20231214.00.00' } },
           continuation: currentToken
         })
       });
-      const data = await response.json();
+      const responseText = await response.text();
+      let data;
+      try { data = JSON.parse(responseText); } catch (err) { setIsLoadingMore(false); return; }
+
       const newData = { Videos: [], Shorts: [], VideosToken: null, ShortsToken: null };
       extractDataIteratively(data, newData, activeTab);
 
-      setTabData(prev => ({
-        ...prev,
-        [activeTab]: [...prev[activeTab], ...newData[activeTab]]
-      }));
-      if (activeTab === 'Videos') setVideoToken(newData.VideosToken);
-      else setShortToken(newData.ShortsToken);
+      const filteredNewItems = newData[activeTab].filter(newObj => !tabData[activeTab].some(existingObj => existingObj.id === newObj.id));
+      setTabData(prev => ({ ...prev, [activeTab]: [...prev[activeTab], ...filteredNewItems] }));
+
+      if (activeTab === 'Videos') setVideoToken(newData.VideosToken || null);
+      else setShortToken(newData.ShortsToken || null);
+
     } catch (error) {} finally { setIsLoadingMore(false); }
   };
 
@@ -227,6 +269,7 @@ export default function ChannelScreen() {
     try {
       const subs = await AsyncStorage.getItem('subscribedChannels');
       let parsedSubs = subs ? JSON.parse(subs) : [];
+
       if (isSubscribed) {
         parsedSubs = parsedSubs.filter(sub => sub.name !== channelName);
         setIsSubscribed(false);
@@ -252,7 +295,7 @@ export default function ChannelScreen() {
             <Ionicons name="play-outline" size={14} color="#FFF" />
             <Text style={styles.shortViewsText}>{item.views}</Text>
           </View>
-          <View style={{ padding: 8 }}>
+          <View style={{ padding: 8, paddingBottom: 12 }}>
             <Text style={styles.shortTitle} numberOfLines={2}>{item.title}</Text>
           </View>
         </TouchableOpacity>
@@ -266,37 +309,82 @@ export default function ChannelScreen() {
           {item.duration ? <Text style={styles.durationBadge}>{item.duration}</Text> : null}
         </TouchableOpacity>
         <View style={styles.videoInfoContainer}>
-          <Text style={styles.videoTitle} numberOfLines={2}>{item.title}</Text>
-          <Text style={styles.videoMeta}>{item.views} • {item.publishedTime}</Text>
+          <TouchableOpacity activeOpacity={0.8} onPress={() => handleVideoPress(item)}>
+            <Text style={styles.videoTitle} numberOfLines={2}>{item.title}</Text>
+            <Text style={styles.videoMeta}>
+              {item.views ? `${item.views}` : ''}
+              {item.views && item.publishedTime ? ' • ' : ''}
+              {item.publishedTime ? `${item.publishedTime}` : ''}
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
+  };
+
+  const renderEmptyComponent = () => {
+    if (loading) return null;
+    return (
+      <View style={styles.emptyStateContainer}>
+        <Text style={styles.emptyStateText}>{activeTab === 'Shorts' ? 'No short video' : 'No videos found'}</Text>
+      </View>
+    );
+  };
+
+  const renderFooter = () => {
+    if (!isLoadingMore) return null;
+    return <View style={{ paddingVertical: 20 }}><ActivityIndicator size="large" color="#FF0000" /></View>;
   };
 
   const ChannelHeader = () => (
     <View>
       <Image source={{ uri: channelBanner }} style={styles.bannerImage} />
       <View style={styles.channelProfileSection}>
-        <View style={styles.avatarWrapper}>
+        <TouchableOpacity 
+          style={styles.avatarWrapper} 
+          activeOpacity={isLiveChannel ? 0.7 : 1} 
+          onPress={() => {
+            if (isLiveChannel && liveVideoData) {
+              DeviceEventEmitter.emit('playVideo', { videoId: liveVideoData.id, videoData: liveVideoData });
+              navigation.navigate('Player', { videoId: liveVideoData.id, videoData: liveVideoData });
+            }
+          }}
+        >
            <Image source={{ uri: channelAvatar }} style={styles.channelLogoLarge} />
-        </View>
+           {isLiveChannel && (
+             <View style={styles.liveBadge}>
+               <Text style={styles.liveBadgeText}>LIVE</Text>
+             </View>
+           )}
+        </TouchableOpacity>
+
         <View style={styles.channelTextInfo}>
           <Text style={styles.channelTitle}>{channelName}</Text>
-          <Text style={styles.channelMeta}>{subscriberCount}</Text>
+          <Text style={styles.channelMeta}>@{(channelName).replace(/\s+/g, '').toLowerCase()} • {subscriberCount}</Text>
         </View>
       </View>
+
       <View style={styles.actionButtonsContainer}>
-        <TouchableOpacity style={[styles.subscribeBtn, isSubscribed ? styles.subscribedState : styles.unsubscribedState]} onPress={handleSubscriptionToggle}>
-          <Text style={[styles.subscribeText, {color: isSubscribed ? '#FFF' : '#0F0F0F'}]}>{isSubscribed ? 'Subscribed' : 'Subscribe'}</Text>
+        <TouchableOpacity style={[styles.subscribeBtn, isSubscribed ? styles.subscribedState : styles.unsubscribedState]} onPress={handleSubscriptionToggle} activeOpacity={0.8}>
+          <Ionicons name={isSubscribed ? "notifications-outline" : "notifications"} size={18} color={isSubscribed ? "#FFF" : "#0F0F0F"} />
+          <Text style={[styles.subscribeText, isSubscribed ? {color: '#FFF'} : {color: '#0F0F0F'}]}>{isSubscribed ? 'Subscribed' : 'Subscribe'}</Text>
         </TouchableOpacity>
       </View>
+
       <View style={styles.tabScrollContainer}>
-        {['Videos', 'Shorts'].map(tab => (
-          <TouchableOpacity key={tab} style={[styles.tabButton, activeTab === tab && styles.activeTabButton]} onPress={() => setActiveTab(tab)}>
-            <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>{tab}</Text>
-          </TouchableOpacity>
-        ))}
+        <FlatList 
+          horizontal={true} 
+          showsHorizontalScrollIndicator={false} 
+          data={['Videos', 'Shorts']} 
+          keyExtractor={(item) => item} 
+          renderItem={({ item }) => (
+            <TouchableOpacity style={[styles.tabButton, activeTab === item && styles.activeTabButton]} onPress={() => setActiveTab(item)}>
+              <Text style={[styles.tabText, activeTab === item && styles.activeTabText]}>{item}</Text>
+            </TouchableOpacity>
+          )}
+        />
       </View>
+      {loading && <View style={{ padding: 50, alignItems: 'center' }}><ActivityIndicator size="large" color="#FF0000" /></View>}
     </View>
   );
 
@@ -310,20 +398,23 @@ export default function ChannelScreen() {
         <Text style={styles.headerTitle} numberOfLines={1}>{channelName}</Text>
       </View>
       <FlatList 
-        key={activeTab === 'Shorts' ? 'G2' : 'L1'}
-        numColumns={activeTab === 'Shorts' ? 2 : 1}
-        data={tabData[activeTab]}
-        renderItem={renderItem}
+        key={activeTab === 'Shorts' ? 'grid-2' : 'list-1'} 
+        numColumns={activeTab === 'Shorts' ? 2 : 1} 
+        data={tabData[activeTab] || []} 
+        renderItem={renderItem} 
+        keyExtractor={(item, index) => item.id + index.toString()} 
         ListHeaderComponent={ChannelHeader}
+        ListEmptyComponent={renderEmptyComponent}
+        ListFooterComponent={renderFooter}
         onEndReached={fetchMoreData}
-        onEndReachedThreshold={0.5}
-        ListFooterComponent={isLoadingMore ? <ActivityIndicator color="red" style={{margin: 20}}/> : null}
+        onEndReachedThreshold={0.5} 
+        showsVerticalScrollIndicator={false} 
+        contentContainerStyle={{ paddingBottom: 80 }} 
       />
     </SafeAreaView>
   );
 }
 
-// Styles remains the same as your original file
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0F0F0F' },
   header: { flexDirection: 'row', alignItems: 'center', height: 50, paddingHorizontal: 10 },
@@ -333,29 +424,33 @@ const styles = StyleSheet.create({
   channelProfileSection: { flexDirection: 'row', padding: 15, alignItems: 'center' },
   avatarWrapper: { marginRight: 15 },
   channelLogoLarge: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#333' },
+  liveBadge: { position: 'absolute', bottom: -5, alignSelf: 'center', backgroundColor: '#FF0000', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 2, borderColor: '#0F0F0F' },
+  liveBadgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
   channelTextInfo: { flex: 1 },
   channelTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFF' },
-  channelMeta: { fontSize: 12, color: '#AAA', marginTop: 2 },
+  channelMeta: { fontSize: 12, color: '#AAA', marginTop: 2, marginBottom: 8 },
   actionButtonsContainer: { flexDirection: 'row', paddingHorizontal: 15, paddingBottom: 15 },
-  subscribeBtn: { flex: 1, paddingVertical: 10, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
+  subscribeBtn: { flex: 1, flexDirection: 'row', paddingVertical: 10, borderRadius: 20, justifyContent: 'center', alignItems: 'center', gap: 5 },
   subscribedState: { backgroundColor: '#272727' },
   unsubscribedState: { backgroundColor: '#F1F1F1' },
   subscribeText: { fontSize: 14, fontWeight: 'bold' },
-  tabScrollContainer: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#222' },
+  tabScrollContainer: { borderBottomWidth: 1, borderBottomColor: '#222' },
   tabButton: { paddingVertical: 15, paddingHorizontal: 20 },
   activeTabButton: { borderBottomWidth: 2, borderBottomColor: '#FFF' },
-  tabText: { color: '#AAA', fontSize: 15 },
+  tabText: { color: '#AAA', fontSize: 15, fontWeight: '500' },
   activeTabText: { color: '#FFF', fontWeight: 'bold' },
   videoCard: { marginBottom: 20 },
-  thumbnailContainer: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#111' },
-  thumbnailImage: { width: '100%', height: '100%' },
-  durationBadge: { position: 'absolute', bottom: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.8)', color: '#FFF', padding: 4, borderRadius: 4, fontSize: 12 },
-  videoInfoContainer: { padding: 12 },
-  videoTitle: { color: '#FFF', fontSize: 15, lineHeight: 20 },
-  videoMeta: { color: '#AAA', fontSize: 13, marginTop: 4 },
-  shortGridItem: { width: (width / 2) - 10, margin: 5, backgroundColor: '#111', borderRadius: 8 },
-  shortGridImage: { width: '100%', height: 250, borderRadius: 8 },
-  shortViewsOverlay: { position: 'absolute', bottom: 60, left: 10, flexDirection: 'row', alignItems: 'center' },
-  shortViewsText: { color: '#FFF', fontSize: 12, marginLeft: 4 },
-  shortTitle: { color: '#FFF', fontSize: 13, padding: 5 }
+  thumbnailContainer: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#111', position: 'relative' },
+  thumbnailImage: { width: '100%', height: '100%', resizeMode: 'cover' },
+  durationBadge: { position: 'absolute', bottom: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.8)', color: '#FFF', fontSize: 12, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4, fontWeight: 'bold' },
+  videoInfoContainer: { paddingHorizontal: 12, paddingTop: 10 },
+  videoTitle: { color: '#FFF', fontSize: 15, fontWeight: '500', marginBottom: 4, lineHeight: 22 },
+  videoMeta: { color: '#AAA', fontSize: 13 },
+  shortGridItem: { width: (width / 2) - 10, margin: 5, position: 'relative', backgroundColor: '#111', borderRadius: 8, overflow: 'hidden' },
+  shortGridImage: { width: '100%', height: 250, resizeMode: 'cover' },
+  shortViewsOverlay: { position: 'absolute', bottom: 55, left: 5, flexDirection: 'row', alignItems: 'center' },
+  shortViewsText: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginLeft: 3, textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 2 },
+  shortTitle: { color: '#FFF', fontSize: 13, fontWeight: '500', lineHeight: 18 },
+  emptyStateContainer: { padding: 40, alignItems: 'center', justifyContent: 'center' },
+  emptyStateText: { color: '#AAA', fontSize: 16, fontWeight: '500' }
 });
