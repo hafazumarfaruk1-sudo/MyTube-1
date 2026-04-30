@@ -52,7 +52,7 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🧠 স্মার্ট এক্সট্রাক্টর (ফিক্সড): এখন প্রথম লোডেই টাইটেল ও সব ডাটা পারফেক্টলি আনবে
+  // 🧠 ফিক্সড এক্সট্রাক্টর: এটি আপনার আগের শক্তিশালী লজিকের সাথে টাইটেল ও ডাটা ধরার লজিক মিলিয়ে তৈরি
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
     const stack = [rootNode];
     const seenIds = new Set();
@@ -66,66 +66,59 @@ export default function ChannelScreen() {
         }
       } else if (node && typeof node === 'object') {
         
-        // টোকেন সেভ করা (Load More এর জন্য)
+        // Load More Token সেভ করা
         if (node.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) {
           categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
         }
 
-        // সাধারণ ভিডিওর ডাটা এক্সট্রাক্ট করা
-        const target = node.videoRenderer || node.gridVideoRenderer || node.compactVideoRenderer || node.richItemRenderer?.content?.videoRenderer;
-        // শর্টস ভিডিওর ডাটা এক্সট্রাক্ট করা
-        const shortTarget = node.reelItemRenderer || node.richItemRenderer?.content?.reelItemRenderer;
+        // টাইটেল চেক (ভিডিও এবং শর্টস উভয়ের জন্য)
+        const titleObj = node.title || node.headline;
+        const titleText = titleObj?.runs?.[0]?.text || titleObj?.simpleText;
 
-        if (target && target.videoId && !seenIds.has(target.videoId)) {
-          seenIds.add(target.videoId);
-          const vId = target.videoId;
+        // ম্যাজিক কন্ডিশন: ভিডিও আইডি এবং টাইটেল একসাথে থাকলেই সেটি একটি পারফেক্ট ভিডিও কার্ড
+        if (node.videoId && titleText && !seenIds.has(node.videoId)) {
+          seenIds.add(node.videoId);
+          const vId = node.videoId;
           
-          const title = target.title?.runs?.[0]?.text || target.title?.simpleText || 'No Title';
-          const duration = target.lengthText?.simpleText || target.lengthText?.runs?.[0]?.text || '';
-          const publishedTime = target.publishedTimeText?.simpleText || target.publishedTimeText?.runs?.[0]?.text || '';
-          const views = target.viewCountText?.simpleText || target.shortViewCountText?.simpleText || '';
-          const isLive = JSON.stringify(target).includes('"BADGE_STYLE_TYPE_LIVE_NOW"');
-          
+          const duration = node.lengthText?.simpleText || node.lengthText?.runs?.[0]?.text || '';
+          const publishedTime = node.publishedTimeText?.simpleText || node.publishedTimeText?.runs?.[0]?.text || '';
+          const views = node.viewCountText?.simpleText || node.viewCountText?.runs?.[0]?.text || node.shortViewCountText?.simpleText || '';
+          const isLive = JSON.stringify(node).includes('"BADGE_STYLE_TYPE_LIVE_NOW"');
+
           const thumbnailUrl = thumbQuality === 'Data Saver' 
               ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
               : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
 
-          categorizedData.Videos.push({
-            id: String(vId),
-            title: String(title),
-            value: `https://www.youtube.com/watch?v=${vId}`, 
-            channel: channelName,
-            avatar: channelAvatar, // ফিক্সড: প্লেয়ার স্ক্রিনের জন্য লোগো পাঠানো হচ্ছে
-            duration: duration || (isLive ? 'Live Now' : ''),
-            publishedTime: publishedTime || (isLive ? 'Live Now' : ''),
-            views: views,
-            thumbnail: thumbnailUrl,
-            isLive: isLive
-          });
-        } 
-        else if (shortTarget && shortTarget.videoId && !seenIds.has(shortTarget.videoId)) {
-          seenIds.add(shortTarget.videoId);
-          const vId = shortTarget.videoId;
-          
-          const title = shortTarget.headline?.simpleText || shortTarget.title?.simpleText || 'Short Video';
-          const views = shortTarget.viewCountText?.simpleText || '';
-          
-          const thumbnailUrl = thumbQuality === 'Data Saver' 
-              ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
-              : `https://i.ytimg.com/vi/${vId}/oardefault.jpg`;
+          // এটি শর্টস নাকি রেগুলার ভিডিও তা চেক করা
+          const isShort = tabType === 'Shorts' || !!node.reelItemRenderer;
 
-          categorizedData.Shorts.push({
-            id: String(vId),
-            title: String(title),
-            value: `https://www.youtube.com/watch?v=${vId}`,
-            channel: channelName,
-            avatar: channelAvatar, // ফিক্সড: প্লেয়ার স্ক্রিনের জন্য লোগো পাঠানো হচ্ছে
-            duration: 'Short',
-            publishedTime: views,
-            views: views,
-            thumbnail: thumbnailUrl,
-            isLive: false
-          });
+          if (isShort) {
+            categorizedData.Shorts.push({
+              id: String(vId),
+              title: String(titleText),
+              value: `https://www.youtube.com/watch?v=${vId}`,
+              channel: channelName,
+              avatar: channelAvatar, // 🎯 প্লেয়ার স্ক্রিনের জন্য লোগো
+              duration: 'Short',
+              publishedTime: views, 
+              views: views,
+              thumbnail: thumbnailUrl,
+              isLive: false
+            });
+          } else {
+            categorizedData.Videos.push({
+              id: String(vId),
+              title: String(titleText),
+              value: `https://www.youtube.com/watch?v=${vId}`, 
+              channel: channelName,
+              avatar: channelAvatar, // 🎯 প্লেয়ার স্ক্রিনের জন্য লোগো
+              duration: duration || (isLive ? 'Live Now' : ''),
+              publishedTime: publishedTime || (isLive ? 'Live Now' : ''),
+              views: views,
+              thumbnail: thumbnailUrl,
+              isLive: isLive
+            });
+          }
         }
 
         // গভীরে যাওয়ার লজিক
@@ -197,22 +190,21 @@ export default function ChannelScreen() {
 
       let parsedVideosData = parseYtData(videosHtml);
       let parsedShortsData = parseYtData(shortsHtml);
+      let parsedHomeData = null;
 
       const categorizedData = { Videos: [], Shorts: [], VideosToken: null, ShortsToken: null };
 
       if (parsedVideosData) extractDataIteratively(parsedVideosData, categorizedData, 'Videos');
       if (parsedShortsData) extractDataIteratively(parsedShortsData, categorizedData, 'Shorts');
 
-      // --- Fallback Logic ---
+      // --- Fallback Logic: হোম পেজ চেক ---
       if (categorizedData.Videos.length === 0 && categorizedData.Shorts.length === 0) {
          try {
             const homeRes = await fetch(`https://www.youtube.com${extractedChannelUrl}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
-            const homeHtml = await homeRes.text();
-            const homeData = parseYtData(homeHtml);
+            parsedHomeData = parseYtData(await homeRes.text());
             
-            if (homeData) {
-               if (!parsedVideosData) parsedVideosData = homeData; 
-               extractDataIteratively(homeData, categorizedData, 'Videos');
+            if (parsedHomeData) {
+               extractDataIteratively(parsedHomeData, categorizedData, 'Videos');
             }
          } catch (err) {}
       }
@@ -224,8 +216,9 @@ export default function ChannelScreen() {
       setShortToken(categorizedData.ShortsToken);
       setTabData({ Videos: categorizedData.Videos, Shorts: categorizedData.Shorts });
 
-      // ফিক্সড: ডিপ ব্যানার স্ক্যানার
-      if (parsedVideosData) {
+      // 🎯 ফিক্সড: ডিপ ব্যানার স্ক্যানার
+      const headerDataNode = parsedVideosData || parsedHomeData;
+      if (headerDataNode) {
         let bannerSrc = null;
         const findBanner = (node) => {
           if (bannerSrc) return;
@@ -236,10 +229,11 @@ export default function ChannelScreen() {
             Object.values(node).forEach(child => { if (typeof child === 'object') findBanner(child); });
           }
         };
-        findBanner(parsedVideosData);
+        findBanner(headerDataNode);
+        
         if (bannerSrc && bannerSrc.length > 0) setChannelBanner(bannerSrc[bannerSrc.length - 1].url);
 
-        const headerNode = parsedVideosData?.header?.c4TabbedHeaderRenderer || parsedVideosData?.header?.pageHeaderRenderer;
+        const headerNode = headerDataNode?.header?.c4TabbedHeaderRenderer || headerDataNode?.header?.pageHeaderRenderer;
         const subs = headerNode?.subscriberCountText?.simpleText || headerNode?.content?.pageHeaderViewModel?.metadata?.metadataRows?.[0]?.metadataParts?.[0]?.text?.content;
         if (subs) setSubscriberCount(subs);
       }
@@ -296,18 +290,17 @@ export default function ChannelScreen() {
     } catch(e) {}
   };
 
-  // ফিক্সড: শর্টস এবং ভিডিওর জন্য আলাদা রাউটিং
+  // 🎯 ফিক্সড: শর্টস এবং ভিডিওর জন্য আলাদা রাউটিং
   const handleVideoPress = (item) => {
     if (activeTab === 'Shorts' || item.duration === 'Short') {
-      // শর্টস স্ক্রিনে পাঠানো হচ্ছে
       navigation.navigate('ShortsScreen', { videoId: item.id, videoData: item });
     } else {
-      // রেগুলার প্লেয়ার স্ক্রিনে পাঠানো হচ্ছে
       DeviceEventEmitter.emit('playVideo', { videoId: item.id, videoData: item });
       navigation.navigate('Player', { videoId: item.id, videoData: item });
     }
   };
 
+  // 🎯 VidMate স্টাইল রেন্ডারার
   const renderItem = ({ item }) => {
     return (
       <TouchableOpacity style={styles.vidmateCard} activeOpacity={0.8} onPress={() => handleVideoPress(item)}>
@@ -344,7 +337,7 @@ export default function ChannelScreen() {
 
   const renderFooter = () => {
     if (!isLoadingMore) return null;
-    return <View style={{ paddingVertical: 20 }}><ActivityIndicator size="large" color="#0F0" /></View>;
+    return <View style={{ paddingVertical: 20 }}><ActivityIndicator size="large" color="#FF0000" /></View>;
   };
 
   const ChannelHeader = () => (
@@ -386,7 +379,7 @@ export default function ChannelScreen() {
           )}
         />
       </View>
-      {loading && <View style={{ padding: 50, alignItems: 'center' }}><ActivityIndicator size="large" color="#0F0" /></View>}
+      {loading && <View style={{ padding: 50, alignItems: 'center' }}><ActivityIndicator size="large" color="#FF0000" /></View>}
     </View>
   );
 
@@ -441,7 +434,7 @@ const styles = StyleSheet.create({
   tabText: { color: '#AAA', fontSize: 15, fontWeight: '500' },
   activeTabText: { color: '#FFF', fontWeight: 'bold' },
   
-  // VidMate স্টাইলের ডিজাইন
+  // 🎯 VidMate স্টাইলের ডিজাইন
   vidmateCard: { 
     flexDirection: 'row', 
     padding: 12, 
