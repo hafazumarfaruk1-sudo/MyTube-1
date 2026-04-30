@@ -70,9 +70,14 @@ export default function ChannelScreen() {
           categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
         }
 
-        if ((node.videoRenderer && node.videoRenderer.videoId) || (node.gridVideoRenderer && node.gridVideoRenderer.videoId)) {
-          const target = node.videoRenderer || node.gridVideoRenderer;
+        // 💡 ফিক্স ১: ছোট চ্যানেলের richItemRenderer ধরার ব্যবস্থা করা হলো
+        let target = null;
+        if (node.videoRenderer && node.videoRenderer.videoId) target = node.videoRenderer;
+        else if (node.gridVideoRenderer && node.gridVideoRenderer.videoId) target = node.gridVideoRenderer;
+        else if (node.compactVideoRenderer && node.compactVideoRenderer.videoId) target = node.compactVideoRenderer;
+        else if (node.richItemRenderer?.content?.videoRenderer?.videoId) target = node.richItemRenderer.content.videoRenderer;
 
+        if (target) {
           const duration = target.lengthText?.simpleText || '';
           const publishedTime = target.publishedTimeText?.simpleText || ''; 
           const title = target.title?.runs?.[0]?.text || target.title?.simpleText || 'No Title';
@@ -80,10 +85,12 @@ export default function ChannelScreen() {
           const isLive = JSON.stringify(target).includes('"BADGE_STYLE_TYPE_LIVE_NOW"');
           const videoId = target.videoId;
 
-          // --- 🕵️‍♂️ আল্টিমেট থাম্বনেইল ফিক্স (আপনার আগের লজিক সহ) ---
-          let finalThumbnailUrl = '';
+          if (categorizedData.Videos.length < 2) { 
+              console.log(`\n🕵️‍♂️ [Deep Detective] Video ID: ${videoId} extracted!`);
+          }
 
-          // ধাপ ১: ইউটিউবের অরিজিনাল JSON থেকে রিয়েল লিংক খোঁজার চেষ্টা (ছোট চ্যানেলের জন্য)
+          // 💡 আপনার আগের মূল লজিক (বড় চ্যানেলের থাম্বনেইল ঠিক রাখার জন্য)
+          let finalThumbnailUrl = '';
           try {
               if (target.thumbnail && target.thumbnail.thumbnails && target.thumbnail.thumbnails.length > 0) {
                   let index = thumbQuality === 'Data Saver' ? 0 : target.thumbnail.thumbnails.length - 1;
@@ -92,7 +99,6 @@ export default function ChannelScreen() {
               }
           } catch(e) {}
 
-          // ধাপ ২: যদি রিয়েল লিংক না পাওয়া যায়, তবে আপনার আগের লজিক কাজ করবে (বড় চ্যানেলের জন্য)
           if (!finalThumbnailUrl || finalThumbnailUrl === '') {
               finalThumbnailUrl = thumbQuality === 'Data Saver' 
                   ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` 
@@ -111,8 +117,6 @@ export default function ChannelScreen() {
           const videoId = node.reelItemRenderer.videoId;
 
           let shortThumbnailUrl = '';
-
-          // শর্টসের রিয়েল লিংক খোঁজার চেষ্টা 
           try {
               if (node.reelItemRenderer.thumbnail && node.reelItemRenderer.thumbnail.thumbnails && node.reelItemRenderer.thumbnail.thumbnails.length > 0) {
                   let index = thumbQuality === 'Data Saver' ? 0 : node.reelItemRenderer.thumbnail.thumbnails.length - 1;
@@ -121,7 +125,6 @@ export default function ChannelScreen() {
               }
           } catch(e) {}
 
-          // আপনার আগের শর্টস লজিক 
           if (!shortThumbnailUrl || shortThumbnailUrl === '') {
               shortThumbnailUrl = thumbQuality === 'Data Saver' 
                   ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` 
@@ -211,8 +214,19 @@ export default function ChannelScreen() {
         return null;
       };
 
-      const parsedVideosData = processMatch(videosMatch, 'Videos');
+      let parsedVideosData = processMatch(videosMatch, 'Videos');
       processMatch(shortsMatch, 'Shorts');
+
+      // 💡 ফিক্স ২: যদি ছোট চ্যানেলে /videos ট্যাব না থাকে, তবে হোমপেজ থেকে ভিডিও আনবে
+      if (categorizedData.Videos.length === 0) {
+          try {
+              const homeRes = await fetch(`https://www.youtube.com${extractedChannelUrl}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
+              const homeHtml = await homeRes.text();
+              let homeMatch = homeHtml.match(/ytInitialData\s*=\s*({.+?});/) || homeHtml.match(/var ytInitialData = (.*?);<\/script>/);
+              let parsedHomeData = processMatch(homeMatch, 'Videos');
+              if (!parsedVideosData) parsedVideosData = parsedHomeData;
+          } catch(e) {}
+      }
 
       categorizedData.Videos = categorizedData.Videos.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
       categorizedData.Shorts = categorizedData.Shorts.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
@@ -303,7 +317,6 @@ export default function ChannelScreen() {
           <Image 
             source={{ uri: item.thumbnail }} 
             style={styles.shortGridImage} 
-            onError={(e) => console.log(`🕵️‍♂️ [Detective] Shorts Failed: ${item.thumbnail}`)}
           />
           <View style={styles.shortViewsOverlay}>
             <Ionicons name="play-outline" size={14} color="#FFF" />
@@ -322,7 +335,6 @@ export default function ChannelScreen() {
           <Image 
             source={{ uri: item.thumbnail }} 
             style={styles.thumbnailImage} 
-            onError={(e) => console.log(`🕵️‍♂️ [Detective] Video Failed: ${item.thumbnail}`)}
           />
           {item.duration ? <Text style={styles.durationBadge}>{item.duration}</Text> : null}
         </TouchableOpacity>
