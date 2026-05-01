@@ -52,61 +52,72 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
+  // 🧠 সুপার-স্মার্ট স্ক্যানার: এটি শুধু রেন্ডারার ব্লক থেকেই সঠিক তথ্য আনবে
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
-    const stack = [{ node: rootNode, currentTitle: 'No Title Found' }];
+    const stack = [rootNode];
     const seenIds = new Set();
 
     while (stack.length > 0) {
-      const { node, currentTitle } = stack.pop();
-
-      let newTitle = currentTitle;
-      if (node && typeof node === 'object') {
-        if (node.title?.runs?.[0]?.text) newTitle = node.title.runs[0].text;
-        else if (node.title?.simpleText) newTitle = node.title.simpleText;
-        else if (node.headline?.simpleText) newTitle = node.headline.simpleText;
-      }
+      const node = stack.pop();
+      if (!node) continue;
 
       if (Array.isArray(node)) {
-        for (let i = 0; i < node.length; i++) {
-          if (node[i] && typeof node[i] === 'object') stack.push({ node: node[i], currentTitle: newTitle });
-        }
-      } else if (node && typeof node === 'object') {
-        
-        // টোকেন আপডেট করা হচ্ছে (যাতে দ্বিতীয় লজিকের পর নতুন টোকেন সেভ হয়)
+        for (let i = 0; i < node.length; i++) stack.push(node[i]);
+        continue;
+      }
+
+      if (typeof node === 'object') {
+        // ১. Load More Token সেভ করা
         if (node.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) {
           categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
         }
 
-        const hasVideoId = !!node.videoId;
-        if (hasVideoId && !seenIds.has(node.videoId)) {
-          seenIds.add(node.videoId);
-          const vId = node.videoId;
+        // ২. স্পেসিফিক রেন্ডারার খোঁজা (যেখানে ভিডিওর সব তথ্য এক জায়গায় গোছানো থাকে)
+        const renderer = node.videoRenderer || node.gridVideoRenderer || node.compactVideoRenderer || node.reelItemRenderer; 
+        
+        if (renderer && renderer.videoId) {
+          const vId = renderer.videoId;
           
-          const duration = node.lengthText?.simpleText || node.lengthText?.runs?.[0]?.text || '';
-          const publishedTime = node.publishedTimeText?.simpleText || node.publishedTimeText?.runs?.[0]?.text || '';
-          const views = node.viewCountText?.simpleText || node.viewCountText?.runs?.[0]?.text || '';
-          const isLive = JSON.stringify(node).includes('"BADGE_STYLE_TYPE_LIVE_NOW"');
-          
-          const thumbnailUrl = thumbQuality === 'Data Saver' 
-              ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
-              : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
+          if (!seenIds.has(vId)) {
+            seenIds.add(vId);
 
-          categorizedData[tabType].push({
-            id: String(vId),
-            title: String(newTitle),
-            value: `https://www.youtube.com/watch?v=${vId}`, 
-            channel: channelName,
-            duration: duration || (tabType === 'Shorts' ? 'Short' : ''),
-            publishedTime: publishedTime || (isLive ? 'Live Now' : ''),
-            views: views,
-            thumbnail: thumbnailUrl,
-            isLive: isLive
-          });
+            // টাইটেল এক্সট্রাক্ট করা
+            let title = 'No Title Found';
+            if (renderer.title?.runs?.[0]?.text) title = renderer.title.runs[0].text;
+            else if (renderer.title?.simpleText) title = renderer.title.simpleText;
+            else if (renderer.headline?.simpleText) title = renderer.headline.simpleText;
+
+            // অন্যান্য মেটা-ডেটা এক্সট্রাক্ট করা
+            const duration = renderer.lengthText?.simpleText || renderer.lengthText?.runs?.[0]?.text || '';
+            const publishedTime = renderer.publishedTimeText?.simpleText || renderer.publishedTimeText?.runs?.[0]?.text || '';
+            const views = renderer.viewCountText?.simpleText || renderer.viewCountText?.runs?.[0]?.text || '';
+            
+            // লাইভ ভিডিও কি না চেক করা
+            const isLive = renderer.badges?.some(badge => badge.metadataBadgeRenderer?.style === 'BADGE_STYLE_TYPE_LIVE_NOW') || false;
+
+            // থাম্বনেইল লজিক
+            const thumbnailUrl = thumbQuality === 'Data Saver' 
+                ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
+                : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
+
+            categorizedData[tabType].push({
+              id: String(vId),
+              title: String(title),
+              value: `https://www.youtube.com/watch?v=${vId}`, 
+              channel: channelName,
+              duration: duration || (tabType === 'Shorts' ? 'Short' : ''),
+              publishedTime: publishedTime || (isLive ? 'Live Now' : ''),
+              views: views,
+              thumbnail: thumbnailUrl,
+              isLive: isLive
+            });
+          }
         }
 
+        // ৩. গভীরে যাওয়ার জন্য অবজেক্টের চাইল্ডগুলোকে স্ট্যাকে পুশ করা
         const values = Object.values(node);
         for (let i = 0; i < values.length; i++) {
-          if (values[i] && typeof values[i] === 'object') stack.push({ node: values[i], currentTitle: newTitle });
+          if (values[i] && typeof values[i] === 'object') stack.push(values[i]);
         }
       }
     }
@@ -208,7 +219,7 @@ export default function ChannelScreen() {
             })
           });
           const apiData = JSON.parse(await apiRes.text());
-          extractDataIteratively(apiData, categorizedData, 'Videos'); // নতুন ডেটা যোগ এবং টোকেন আপডেট
+          extractDataIteratively(apiData, categorizedData, 'Videos'); 
         } catch (e) {}
       }
 
