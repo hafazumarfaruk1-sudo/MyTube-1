@@ -53,7 +53,7 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🧠 স্মার্ট স্ক্যানার (আপনার দেওয়া লজিক অনুযায়ী অক্ষত রাখা হয়েছে)
+  // 🧠 স্মার্ট স্ক্যানার (ফিক্সড): এখন শুধুমাত্র ভ্যালিড ভিডিও নোড থেকে টাইটেল ও সব তথ্য নেবে
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
     const stack = [{ node: rootNode, currentTitle: 'No Title Found' }];
     const seenIds = new Set();
@@ -63,7 +63,7 @@ export default function ChannelScreen() {
 
       // টাইটেল মনে রাখার লজিক
       let newTitle = currentTitle;
-      if (node && typeof node === 'object') {
+      if (node && typeof node === 'object' && !Array.isArray(node)) {
         if (node.title?.runs?.[0]?.text) newTitle = node.title.runs[0].text;
         else if (node.title?.simpleText) newTitle = node.title.simpleText;
         else if (node.headline?.simpleText) newTitle = node.headline.simpleText;
@@ -80,11 +80,13 @@ export default function ChannelScreen() {
           categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
         }
 
-        // ভিডিও আইডি পেলে লিংক, টাইটেল এবং অন্যান্য তথ্য সেভ করা
-        const hasVideoId = !!node.videoId;
-        if (hasVideoId && !seenIds.has(node.videoId)) {
-          seenIds.add(node.videoId);
-          const vId = node.videoId;
+        const vId = node.videoId;
+        
+        // 💡 মেইন ফিক্স: ভিডিও আইডি থাকার পাশাপাশি অবশ্যই টাইটেল বা অন্যান্য মেটাডেটা থাকতে হবে
+        const isRealVideoObj = vId && (node.title || node.lengthText || node.viewCountText || node.publishedTimeText);
+
+        if (isRealVideoObj && !seenIds.has(vId)) {
+          seenIds.add(vId);
 
           // ভিডিওর অন্যান্য তথ্য এক্সট্রাক্ট করা হচ্ছে
           const duration = node.lengthText?.simpleText || node.lengthText?.runs?.[0]?.text || '';
@@ -97,9 +99,14 @@ export default function ChannelScreen() {
               ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
               : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
 
+          // সঠিক টাইটেল সেট করা হচ্ছে
+          let finalTitle = newTitle !== 'No Title Found' ? newTitle : 'YouTube Video';
+          if (node.title?.runs?.[0]?.text) finalTitle = node.title.runs[0].text;
+          else if (node.title?.simpleText) finalTitle = node.title.simpleText;
+
           categorizedData[tabType].push({
             id: String(vId),
-            title: String(newTitle),
+            title: String(finalTitle),
             value: `https://www.youtube.com/watch?v=${vId}`, 
             channel: channelName,
             duration: duration || (tabType === 'Shorts' ? 'Short' : ''),
@@ -119,7 +126,7 @@ export default function ChannelScreen() {
     }
   };
 
-  // 🎯 নতুন হেল্পার: এটি আপনার এক্সট্রাক্ট করা ডেটাকে রিভার্স করে নতুন থেকে পুরাতন ক্রমানুসারে সাজাবে
+  // 🎯 রিভার্স লজিক: এটি ডেটাকে নতুন থেকে পুরাতন ক্রমানুসারে সাজাবে
   const extractAndSortChunk = (data, tabType, mainDataObj) => {
     const tempObj = { [tabType]: [], [`${tabType}Token`]: null };
     extractDataIteratively(data, tempObj, tabType);
@@ -291,17 +298,15 @@ export default function ChannelScreen() {
     navigation.navigate('Player', { videoId: item.id, videoData: item });
   };
 
-  // 🎯 VidMate স্টাইলের রেন্ডারার (আপনার দেওয়া ডিজাইন অক্ষত রাখা হয়েছে)
+  // 🎯 VidMate স্টাইলের রেন্ডারার
   const renderItem = ({ item }) => {
     return (
       <TouchableOpacity style={styles.vidmateCard} activeOpacity={0.8} onPress={() => handleVideoPress(item)}>
-        {/* বাম সাইড: ছোট থাম্বনেইল এবং সময় */}
         <View style={styles.thumbnailWrapper}>
           <Image source={{ uri: item.thumbnail }} style={styles.vidmateThumbnail} />
           {item.duration ? <Text style={styles.durationBadge}>{item.duration}</Text> : null}
         </View>
 
-        {/* ডান সাইড: টাইটেল, লিংক, বয়স এবং ভিউজ */}
         <View style={styles.infoWrapper}>
           <Text style={styles.vidmateTitle} numberOfLines={2}>{item.title}</Text>
 
@@ -424,7 +429,6 @@ const styles = StyleSheet.create({
   tabText: { color: '#AAA', fontSize: 15, fontWeight: '500' },
   activeTabText: { color: '#FFF', fontWeight: 'bold' },
 
-  // 🎯 VidMate স্টাইলের নতুন ডিজাইন (আপনার দেওয়া স্টাইল অক্ষত রাখা হয়েছে)
   vidmateCard: { 
     flexDirection: 'row', 
     padding: 12, 
