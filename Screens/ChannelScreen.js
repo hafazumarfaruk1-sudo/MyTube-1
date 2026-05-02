@@ -52,7 +52,7 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🎯 অরিজিনাল এক্সট্র্যাক্টর: আপনার পুরনো ১০০% কাজ করা লজিক (যা সব ভিডিও নির্ভুলভাবে লোড করে)
+  // 🎯 হাইব্রিড স্ক্যানার: আপনার অরিজিনাল লজিকের সাথে স্মার্ট ফিল্টারিং
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
     const stack = [{ node: rootNode, currentTitle: 'No Title Found' }];
     const seenIds = new Set();
@@ -60,6 +60,7 @@ export default function ChannelScreen() {
     while (stack.length > 0) {
       const { node, currentTitle } = stack.pop();
 
+      // প্যারেন্ট থেকে টাইটেল মনে রাখার ট্র্যাকিং
       let newTitle = currentTitle;
       if (node && typeof node === 'object') {
         if (node.title?.runs?.[0]?.text) newTitle = node.title.runs[0].text;
@@ -73,11 +74,14 @@ export default function ChannelScreen() {
         }
       } else if (node && typeof node === 'object') {
         
+        // টোকেন সেভ করা
         if (node.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) {
           categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
         }
 
         const vId = node.videoId;
+        
+        // 💡 এই লাইনটিই আসল লজিক: ভিডিও আইডির সাথে অন্তত টাইটেল, সময় বা ভিউ থাকতে হবে
         const isRealVideoObj = vId && (node.title || node.lengthText || node.viewCountText || node.thumbnail);
 
         if (isRealVideoObj && !seenIds.has(vId)) {
@@ -92,6 +96,7 @@ export default function ChannelScreen() {
               ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
               : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
 
+          // যদি এই নোডের ভেতরে সরাসরি টাইটেল না থাকে, তবে আগের ট্র্যাক করা Title ব্যবহার করবে
           let finalTitle = newTitle !== 'No Title Found' ? newTitle : 'YouTube Video';
           if (node.title?.runs?.[0]?.text) finalTitle = node.title.runs[0].text;
           else if (node.title?.simpleText) finalTitle = node.title.simpleText;
@@ -109,25 +114,12 @@ export default function ChannelScreen() {
           });
         }
 
+        // গভীরে যাওয়ার জন্য চাইল্ডগুলোকে স্ট্যাকে পুশ করা
         const values = Object.values(node);
         for (let i = 0; i < values.length; i++) {
           if (values[i] && typeof values[i] === 'object') stack.push({ node: values[i], currentTitle: newTitle });
         }
       }
-    }
-  };
-
-  // 🎯 নতুন হেল্পার: এটি অরিজিনাল ফাংশন থেকে পাওয়া উল্টো ডেটাকে সোজা (নতুন থেকে পুরাতন) করে মেইন ডেটায় বসাবে
-  const extractAndSortChunk = (data, tabType, mainDataObj) => {
-    const tempObj = { [tabType]: [], [`${tabType}Token`]: null };
-    extractDataIteratively(data, tempObj, tabType);
-    
-    // 💡 ম্যাজিক লজিক: ভিডিওর খণ্ডটিকে রিভার্স করে মেইন লিস্টে যোগ করা হচ্ছে
-    const sortedChunk = tempObj[tabType].reverse();
-    mainDataObj[tabType] = [...mainDataObj[tabType], ...sortedChunk];
-    
-    if (tempObj[`${tabType}Token`]) {
-      mainDataObj[`${tabType}Token`] = tempObj[`${tabType}Token`];
     }
   };
 
@@ -196,9 +188,8 @@ export default function ChannelScreen() {
 
       const categorizedData = { Videos: [], Shorts: [], VideosToken: null, ShortsToken: null };
 
-      // 🎯 নতুন হেল্পার ব্যবহার করে ডেটা লোড এবং সর্ট করা হচ্ছে
-      if (parsedVideosData) extractAndSortChunk(parsedVideosData, 'Videos', categorizedData);
-      if (parsedShortsData) extractAndSortChunk(parsedShortsData, 'Shorts', categorizedData);
+      if (parsedVideosData) extractDataIteratively(parsedVideosData, categorizedData, 'Videos');
+      if (parsedShortsData) extractDataIteratively(parsedShortsData, categorizedData, 'Shorts');
 
       if (categorizedData.Videos.length === 0 && categorizedData.Shorts.length === 0) {
          try {
@@ -208,7 +199,7 @@ export default function ChannelScreen() {
             
             if (homeData) {
                if (!parsedVideosData) parsedVideosData = homeData; 
-               extractAndSortChunk(homeData, 'Videos', categorizedData);
+               extractDataIteratively(homeData, categorizedData, 'Videos');
             }
          } catch (err) {}
       }
@@ -225,7 +216,7 @@ export default function ChannelScreen() {
             })
           });
           const apiData = JSON.parse(await apiRes.text());
-          extractAndSortChunk(apiData, 'Videos', categorizedData);
+          extractDataIteratively(apiData, categorizedData, 'Videos'); 
         } catch (e) {}
       }
 
@@ -240,7 +231,7 @@ export default function ChannelScreen() {
             })
           });
           const apiData = JSON.parse(await apiRes.text());
-          extractAndSortChunk(apiData, 'Shorts', categorizedData);
+          extractDataIteratively(apiData, categorizedData, 'Shorts');
         } catch (e) {}
       }
 
@@ -286,10 +277,7 @@ export default function ChannelScreen() {
       const newData = { Videos: [], Shorts: [], VideosToken: null, ShortsToken: null };
       extractDataIteratively(data, newData, activeTab);
 
-      // 🎯 নতুন লোড হওয়া ডেটাকেও রিভার্স করে সোজা করা হচ্ছে
-      const sortedNewItems = newData[activeTab].reverse();
-      const filteredNewItems = sortedNewItems.filter(newObj => !tabData[activeTab].some(existingObj => existingObj.id === newObj.id));
-      
+      const filteredNewItems = newData[activeTab].filter(newObj => !tabData[activeTab].some(existingObj => existingObj.id === newObj.id));
       setTabData(prev => ({ ...prev, [activeTab]: [...prev[activeTab], ...filteredNewItems] }));
 
       if (activeTab === 'Videos') setVideoToken(newData.VideosToken || null);
@@ -436,7 +424,6 @@ export default function ChannelScreen() {
 }
 
 const styles = StyleSheet.create({
-  // ... (স্টাইলস আগের মতোই থাকবে)
   container: { flex: 1, backgroundColor: '#0F0F0F' },
   header: { flexDirection: 'row', alignItems: 'center', height: 50, paddingHorizontal: 10 },
   headerIcon: { padding: 10 },
