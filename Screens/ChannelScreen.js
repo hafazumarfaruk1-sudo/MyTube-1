@@ -9,6 +9,23 @@ import { DeviceEventEmitter } from 'react-native';
 const { width } = Dimensions.get('window');
 const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+// 🎯 API থেকে আসা সেকেন্ডকে ফরমেট করার হেল্পার
+const formatDuration = (seconds) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return h > 0 ? `${h}:${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}` : `${m}:${s < 10 ? '0' : ''}${s}`;
+};
+
+// 🎯 API থেকে আসা ভিউজকে ফরমেট করার হেল্পার
+const formatViews = (viewCount) => {
+    const num = parseInt(viewCount);
+    if (isNaN(num)) return viewCount;
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+    return num.toString();
+};
+
 export default function ChannelScreen() {
   const navigation = useNavigation();
   const route = useRoute();
@@ -53,86 +70,69 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🧠 উন্নত স্মার্ট স্ক্যানার: ভিডিওর যাবতীয় তথ্য (টাইটেল, ভিউ, সময়) নিখুঁতভাবে বের করার জন্য
+  // 🧠 স্মার্ট স্ক্যানার: এখন শুধু আসল ভিডিও বক্স থেকে ডেটা নেবে
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
-    const stack = [{ node: rootNode }];
+    const stack = [{ node: rootNode, currentTitle: 'No Title Found' }];
     const seenIds = new Set();
 
     while (stack.length > 0) {
-      const { node } = stack.pop();
+      const { node, currentTitle } = stack.pop();
+
+      let newTitle = currentTitle;
+      if (node && typeof node === 'object') {
+        if (node.title?.runs?.[0]?.text) newTitle = node.title.runs[0].text;
+        else if (node.title?.simpleText) newTitle = node.title.simpleText;
+        else if (node.headline?.simpleText) newTitle = node.headline.simpleText;
+      }
 
       if (Array.isArray(node)) {
         for (let i = 0; i < node.length; i++) {
-          if (node[i] && typeof node[i] === 'object') stack.push({ node: node[i] });
+          if (node[i] && typeof node[i] === 'object') stack.push({ node: node[i], currentTitle: newTitle });
         }
       } else if (node && typeof node === 'object') {
-        
-        // Token extraction (Load More)
+
         if (node.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) {
           categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
         }
 
-        // YouTube-এর নির্দিষ্ট রেন্ডারার ব্লকগুলো চেক করা হচ্ছে যেখানে ভিডিওর সব ডেটা একসাথে থাকে
-        const videoData = node.videoRenderer || node.gridVideoRenderer || node.compactVideoRenderer || node.reelItemRenderer || (node.videoId ? node : null);
+        const vId = node.videoId;
+        
+        // 💡 মেইন ফিক্স: ভিডিও আইডি থাকার পাশাপাশি অবশ্যই টাইটেল বা ভিউ বা সময় থাকতে হবে
+        const isRealVideoObj = vId && (node.title || node.lengthText || node.viewCountText || node.thumbnail || node.publishedTimeText);
 
-        if (videoData && videoData.videoId) {
-          const vId = videoData.videoId;
+        if (isRealVideoObj && !seenIds.has(vId)) {
+          seenIds.add(vId);
+          
+          const duration = node.lengthText?.simpleText || node.lengthText?.runs?.[0]?.text || '';
+          const publishedTime = node.publishedTimeText?.simpleText || node.publishedTimeText?.runs?.[0]?.text || '';
+          const views = node.viewCountText?.simpleText || node.viewCountText?.runs?.[0]?.text || '';
+          const isLive = JSON.stringify(node).includes('"BADGE_STYLE_TYPE_LIVE_NOW"');
+          
+          const thumbnailUrl = thumbQuality === 'Data Saver' 
+              ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
+              : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
 
-          // যাচাই করা হচ্ছে এটি আসল ভিডিও অবজেক্ট কিনা
-          if (!seenIds.has(vId) && (videoData.title || videoData.headline || videoData.thumbnail)) {
-            seenIds.add(vId);
+          // টাইটেল ভ্যালিডেশন
+          let finalTitle = newTitle !== 'No Title Found' ? newTitle : 'YouTube Video';
+          if (node.title?.runs?.[0]?.text) finalTitle = node.title.runs[0].text;
+          else if (node.title?.simpleText) finalTitle = node.title.simpleText;
 
-            // 1. Title Extraction
-            let title = 'YouTube Video';
-            if (videoData.title?.runs?.[0]?.text) title = videoData.title.runs[0].text;
-            else if (videoData.title?.simpleText) title = videoData.title.simpleText;
-            else if (videoData.headline?.runs?.[0]?.text) title = videoData.headline.runs[0].text;
-            else if (videoData.headline?.simpleText) title = videoData.headline.simpleText;
-
-            // 2. Duration Extraction
-            let duration = '';
-            if (videoData.lengthText?.simpleText) duration = videoData.lengthText.simpleText;
-            else if (videoData.lengthText?.runs?.[0]?.text) duration = videoData.lengthText.runs[0].text;
-            else if (tabType === 'Shorts') duration = 'Short';
-
-            // 3. Views Extraction
-            let views = '';
-            if (videoData.viewCountText?.simpleText) views = videoData.viewCountText.simpleText;
-            else if (videoData.viewCountText?.runs?.[0]?.text) views = videoData.viewCountText.runs[0].text;
-            else if (videoData.shortViewCountText?.simpleText) views = videoData.shortViewCountText.simpleText;
-            else if (videoData.shortViewCountText?.runs?.[0]?.text) views = videoData.shortViewCountText.runs[0].text;
-
-            // 4. Published Time Extraction
-            let publishedTime = '';
-            if (videoData.publishedTimeText?.simpleText) publishedTime = videoData.publishedTimeText.simpleText;
-            else if (videoData.publishedTimeText?.runs?.[0]?.text) publishedTime = videoData.publishedTimeText.runs[0].text;
-
-            // 5. Live Check
-            const isLive = JSON.stringify(videoData).includes('"BADGE_STYLE_TYPE_LIVE_NOW"');
-            if (isLive) publishedTime = 'Live Now';
-
-            // 6. Thumbnail
-            const thumbnailUrl = thumbQuality === 'Data Saver' 
-                ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
-                : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
-
-            categorizedData[tabType].push({
-              id: String(vId),
-              title: String(title),
-              value: `https://www.youtube.com/watch?v=${vId}`, 
-              channel: channelName,
-              duration: duration,
-              publishedTime: publishedTime,
-              views: views,
-              thumbnail: thumbnailUrl,
-              isLive: isLive
-            });
-          }
+          categorizedData[tabType].push({
+            id: String(vId),
+            title: String(finalTitle),
+            value: `https://www.youtube.com/watch?v=${vId}`, 
+            channel: channelName,
+            duration: duration || (tabType === 'Shorts' ? 'Short' : ''),
+            publishedTime: publishedTime || (isLive ? 'Live Now' : ''),
+            views: views,
+            thumbnail: thumbnailUrl,
+            isLive: isLive
+          });
         }
 
         const values = Object.values(node);
         for (let i = 0; i < values.length; i++) {
-          if (values[i] && typeof values[i] === 'object') stack.push({ node: values[i] });
+          if (values[i] && typeof values[i] === 'object') stack.push({ node: values[i], currentTitle: newTitle });
         }
       }
     }
@@ -160,6 +160,43 @@ export default function ChannelScreen() {
       try { return JSON.parse(match[1]); } catch(e) { return null; }
     }
     return null;
+  };
+
+  // 🚀 আপনার নির্দেশিত API কল ফাংশন (সেকেন্ডের কম সময়ে সব ভিডিওর ডেটা নিয়ে আসবে)
+  const enrichDataViaAPI = async (videosList, tabType, currentApiKey) => {
+    if (!videosList || videosList.length === 0 || !currentApiKey) return;
+
+    // Promise.all ব্যবহার করে লিস্টের সব ভিডিওর জন্য একই সাথে API রিকোয়েস্ট পাঠানো হচ্ছে
+    const updatedVideos = await Promise.all(videosList.map(async (vid) => {
+        try {
+            const res = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${currentApiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'User-Agent': DESKTOP_AGENT },
+                body: JSON.stringify({
+                    context: { client: { clientName: 'WEB', clientVersion: '2.20231214.00.00' } },
+                    videoId: vid.id
+                })
+            });
+            const textData = await res.text();
+            const data = JSON.parse(textData);
+            const details = data?.videoDetails;
+
+            if (details) {
+                return {
+                    ...vid,
+                    title: details.title || vid.title, // API থেকে প্রাপ্ত অরিজিনাল টাইটেল
+                    duration: details.lengthSeconds ? formatDuration(parseInt(details.lengthSeconds)) : vid.duration,
+                    views: details.viewCount ? `${formatViews(details.viewCount)} views` : vid.views,
+                };
+            }
+        } catch (e) {
+            return vid;
+        }
+        return vid;
+    }));
+
+    // API থেকে পাওয়া নতুন ডেটা দিয়ে সরাসরি স্টেট রিপ্লেস করে দেওয়া হলো
+    setTabData(prev => ({ ...prev, [tabType]: updatedVideos }));
   };
 
   const fetchChannelData = async () => {
@@ -205,9 +242,11 @@ export default function ChannelScreen() {
       const videosHtml = await videosRes.text();
       const shortsHtml = await shortsRes.text();
 
+      let currentApiKey = null;
       const apiMatch = videosHtml.match(/"INNERTUBE_API_KEY":"(.*?)"/);
       if (apiMatch && apiMatch[1]) {
-          setApiKey(apiMatch[1]);
+          currentApiKey = apiMatch[1];
+          setApiKey(currentApiKey);
       }
 
       let parsedVideosData = parseYtData(videosHtml);
@@ -239,7 +278,16 @@ export default function ChannelScreen() {
       setVideoToken(categorizedData.VideosToken);
       setShortToken(categorizedData.ShortsToken);
 
+      // প্রথমে ওয়েবের ডেটা সেট করে দেওয়া হলো যেন স্ক্রিন খালি না থাকে
       setTabData({ Videos: categorizedData.Videos, Shorts: categorizedData.Shorts });
+
+      // 🚀 আপনার নির্দেশ অনুযায়ী: ওয়েবের ডেটা সেট হওয়ার ঠিক পরপরই API কল করা হচ্ছে
+      if (currentApiKey) {
+          setTimeout(() => {
+              enrichDataViaAPI(categorizedData.Videos, 'Videos', currentApiKey);
+              enrichDataViaAPI(categorizedData.Shorts, 'Shorts', currentApiKey);
+          }, 100); // 100ms ডিলে দিয়ে কল করা হলো যেন UI রেন্ডার হওয়ার সুযোগ পায়
+      }
 
       // Header Data
       if (parsedVideosData) {
