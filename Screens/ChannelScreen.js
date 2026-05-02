@@ -52,7 +52,7 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🎯 সুপারফাস্ট এক্সট্র্যাক্টর: পারফরম্যান্স ঠিক রেখে অরিজিনাল সিরিয়াল (নতুন থেকে পুরাতন) মেইনটেইন করবে
+  // 🎯 অরিজিনাল এক্সট্র্যাক্টর: আপনার পুরনো ১০০% কাজ করা লজিক (যা সব ভিডিও নির্ভুলভাবে লোড করে)
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
     const stack = [{ node: rootNode, currentTitle: 'No Title Found' }];
     const seenIds = new Set();
@@ -61,19 +61,15 @@ export default function ChannelScreen() {
       const { node, currentTitle } = stack.pop();
 
       let newTitle = currentTitle;
-      // Array চেক করা হচ্ছে যাতে শুধু অবজেক্টের টাইটেল নেয়
-      if (node && typeof node === 'object' && !Array.isArray(node)) {
+      if (node && typeof node === 'object') {
         if (node.title?.runs?.[0]?.text) newTitle = node.title.runs[0].text;
         else if (node.title?.simpleText) newTitle = node.title.simpleText;
         else if (node.headline?.simpleText) newTitle = node.headline.simpleText;
       }
 
       if (Array.isArray(node)) {
-        // 💡 ম্যাজিক ট্রিক: Array এর শেষের দিক থেকে স্ট্যাকে ঢোকানো হচ্ছে
-        for (let i = node.length - 1; i >= 0; i--) {
-          if (node[i] && typeof node[i] === 'object') {
-             stack.push({ node: node[i], currentTitle: newTitle });
-          }
+        for (let i = 0; i < node.length; i++) {
+          if (node[i] && typeof node[i] === 'object') stack.push({ node: node[i], currentTitle: newTitle });
         }
       } else if (node && typeof node === 'object') {
         
@@ -113,14 +109,25 @@ export default function ChannelScreen() {
           });
         }
 
-        // 💡 অবজেক্টের ভ্যালুগুলোকেও উল্টো দিক থেকে স্ট্যাকে পুশ করা হচ্ছে
         const values = Object.values(node);
-        for (let i = values.length - 1; i >= 0; i--) {
-          if (values[i] && typeof values[i] === 'object') {
-             stack.push({ node: values[i], currentTitle: newTitle });
-          }
+        for (let i = 0; i < values.length; i++) {
+          if (values[i] && typeof values[i] === 'object') stack.push({ node: values[i], currentTitle: newTitle });
         }
       }
+    }
+  };
+
+  // 🎯 নতুন হেল্পার: এটি অরিজিনাল ফাংশন থেকে পাওয়া উল্টো ডেটাকে সোজা (নতুন থেকে পুরাতন) করে মেইন ডেটায় বসাবে
+  const extractAndSortChunk = (data, tabType, mainDataObj) => {
+    const tempObj = { [tabType]: [], [`${tabType}Token`]: null };
+    extractDataIteratively(data, tempObj, tabType);
+    
+    // 💡 ম্যাজিক লজিক: ভিডিওর খণ্ডটিকে রিভার্স করে মেইন লিস্টে যোগ করা হচ্ছে
+    const sortedChunk = tempObj[tabType].reverse();
+    mainDataObj[tabType] = [...mainDataObj[tabType], ...sortedChunk];
+    
+    if (tempObj[`${tabType}Token`]) {
+      mainDataObj[`${tabType}Token`] = tempObj[`${tabType}Token`];
     }
   };
 
@@ -189,8 +196,9 @@ export default function ChannelScreen() {
 
       const categorizedData = { Videos: [], Shorts: [], VideosToken: null, ShortsToken: null };
 
-      if (parsedVideosData) extractDataIteratively(parsedVideosData, categorizedData, 'Videos');
-      if (parsedShortsData) extractDataIteratively(parsedShortsData, categorizedData, 'Shorts');
+      // 🎯 নতুন হেল্পার ব্যবহার করে ডেটা লোড এবং সর্ট করা হচ্ছে
+      if (parsedVideosData) extractAndSortChunk(parsedVideosData, 'Videos', categorizedData);
+      if (parsedShortsData) extractAndSortChunk(parsedShortsData, 'Shorts', categorizedData);
 
       if (categorizedData.Videos.length === 0 && categorizedData.Shorts.length === 0) {
          try {
@@ -200,11 +208,12 @@ export default function ChannelScreen() {
             
             if (homeData) {
                if (!parsedVideosData) parsedVideosData = homeData; 
-               extractDataIteratively(homeData, categorizedData, 'Videos');
+               extractAndSortChunk(homeData, 'Videos', categorizedData);
             }
          } catch (err) {}
       }
 
+      // --- ডাবল লোডিং লজিক ---
       if (categorizedData.VideosToken && extractedApiKey) {
         try {
           const apiRes = await fetch(`https://www.youtube.com/youtubei/v1/browse?key=${extractedApiKey}`, {
@@ -216,7 +225,7 @@ export default function ChannelScreen() {
             })
           });
           const apiData = JSON.parse(await apiRes.text());
-          extractDataIteratively(apiData, categorizedData, 'Videos'); 
+          extractAndSortChunk(apiData, 'Videos', categorizedData);
         } catch (e) {}
       }
 
@@ -231,11 +240,10 @@ export default function ChannelScreen() {
             })
           });
           const apiData = JSON.parse(await apiRes.text());
-          extractDataIteratively(apiData, categorizedData, 'Shorts');
+          extractAndSortChunk(apiData, 'Shorts', categorizedData);
         } catch (e) {}
       }
 
-      // ডুপ্লিকেট রিমুভ করা
       categorizedData.Videos = categorizedData.Videos.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
       categorizedData.Shorts = categorizedData.Shorts.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
 
@@ -278,7 +286,10 @@ export default function ChannelScreen() {
       const newData = { Videos: [], Shorts: [], VideosToken: null, ShortsToken: null };
       extractDataIteratively(data, newData, activeTab);
 
-      const filteredNewItems = newData[activeTab].filter(newObj => !tabData[activeTab].some(existingObj => existingObj.id === newObj.id));
+      // 🎯 নতুন লোড হওয়া ডেটাকেও রিভার্স করে সোজা করা হচ্ছে
+      const sortedNewItems = newData[activeTab].reverse();
+      const filteredNewItems = sortedNewItems.filter(newObj => !tabData[activeTab].some(existingObj => existingObj.id === newObj.id));
+      
       setTabData(prev => ({ ...prev, [activeTab]: [...prev[activeTab], ...filteredNewItems] }));
 
       if (activeTab === 'Videos') setVideoToken(newData.VideosToken || null);
@@ -425,6 +436,7 @@ export default function ChannelScreen() {
 }
 
 const styles = StyleSheet.create({
+  // ... (স্টাইলস আগের মতোই থাকবে)
   container: { flex: 1, backgroundColor: '#0F0F0F' },
   header: { flexDirection: 'row', alignItems: 'center', height: 50, paddingHorizontal: 10 },
   headerIcon: { padding: 10 },
