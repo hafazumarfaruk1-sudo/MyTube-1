@@ -53,7 +53,7 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🧠 স্মার্ট স্ক্যানার: এটি শুধু টাইটেল এবং লিংক বের করবে (কোনো থাম্বনেইল রেন্ডার করবে না)
+  // 🧠 স্মার্ট স্ক্যানার: এটি হুবহু আগের মতোই আছে, শুধু অতিরিক্ত তথ্য (সময়, বয়স, ভিউজ) একসাথে এক্সট্রাক্ট করবে
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
     const stack = [{ node: rootNode, currentTitle: 'No Title Found' }];
     const seenIds = new Set();
@@ -80,17 +80,33 @@ export default function ChannelScreen() {
           categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
         }
 
-        // ভিডিও আইডি পেলে লিংক ও টাইটেল সেভ করা
+        // ভিডিও আইডি পেলে লিংক, টাইটেল এবং অন্যান্য তথ্য সেভ করা
         const hasVideoId = !!node.videoId;
         if (hasVideoId && !seenIds.has(node.videoId)) {
           seenIds.add(node.videoId);
           const vId = node.videoId;
           
+          // ভিডিওর অন্যান্য তথ্য এক্সট্রাক্ট করা হচ্ছে
+          const duration = node.lengthText?.simpleText || node.lengthText?.runs?.[0]?.text || '';
+          const publishedTime = node.publishedTimeText?.simpleText || node.publishedTimeText?.runs?.[0]?.text || '';
+          const views = node.viewCountText?.simpleText || node.viewCountText?.runs?.[0]?.text || '';
+          const isLive = JSON.stringify(node).includes('"BADGE_STYLE_TYPE_LIVE_NOW"');
+          
+          // থাম্বনেইল লিংক তৈরি করা হচ্ছে
+          const thumbnailUrl = thumbQuality === 'Data Saver' 
+              ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
+              : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
+
           categorizedData[tabType].push({
             id: String(vId),
             title: String(newTitle),
-            value: `https://www.youtube.com/watch?v=${vId}`, // সরাসরি লিংক
+            value: `https://www.youtube.com/watch?v=${vId}`, 
             channel: channelName,
+            duration: duration || (tabType === 'Shorts' ? 'Short' : ''),
+            publishedTime: publishedTime || (isLive ? 'Live Now' : ''),
+            views: views,
+            thumbnail: thumbnailUrl,
+            isLive: isLive
           });
         }
 
@@ -257,12 +273,28 @@ export default function ChannelScreen() {
     navigation.navigate('Player', { videoId: item.id, videoData: item });
   };
 
-  // 🎯 পরিবর্তিত renderItem (শুধু টাইটেল এবং লিংক দেখাবে)
+  // 🎯 VidMate স্টাইলের রেন্ডারার (বামে ছোট থাম্বনেইল, ডানে সব তথ্য)
   const renderItem = ({ item }) => {
     return (
-      <TouchableOpacity style={styles.debugCard} activeOpacity={0.8} onPress={() => handleVideoPress(item)}>
-        <Text style={styles.debugTitle} numberOfLines={2}>{item.title}</Text>
-        <Text style={styles.debugType}>লিংক: <Text style={styles.debugValue}>{item.value}</Text></Text>
+      <TouchableOpacity style={styles.vidmateCard} activeOpacity={0.8} onPress={() => handleVideoPress(item)}>
+        {/* বাম সাইড: ছোট থাম্বনেইল এবং সময় */}
+        <View style={styles.thumbnailWrapper}>
+          <Image source={{ uri: item.thumbnail }} style={styles.vidmateThumbnail} />
+          {item.duration ? <Text style={styles.durationBadge}>{item.duration}</Text> : null}
+        </View>
+
+        {/* ডান সাইড: টাইটেল, লিংক, বয়স এবং ভিউজ */}
+        <View style={styles.infoWrapper}>
+          <Text style={styles.vidmateTitle} numberOfLines={2}>{item.title}</Text>
+          
+          <Text style={styles.vidmateMeta}>
+            {item.views ? `${item.views}` : ''}
+            {item.views && item.publishedTime ? ' • ' : ''}
+            {item.publishedTime ? `${item.publishedTime}` : ''}
+          </Text>
+          
+          <Text style={styles.vidmateLink} numberOfLines={1}>{item.value}</Text>
+        </View>
       </TouchableOpacity>
     );
   };
@@ -335,7 +367,7 @@ export default function ChannelScreen() {
         <Text style={styles.headerTitle} numberOfLines={1}>{channelName}</Text>
       </View>
       <FlatList 
-        key={activeTab === 'Shorts' ? 'grid-2' : 'list-1'} 
+        key={activeTab === 'Shorts' ? 'list-shorts' : 'list-videos'} 
         data={tabData[activeTab] || []} 
         renderItem={renderItem} 
         keyExtractor={(item, index) => item.id + index.toString()} 
@@ -373,11 +405,62 @@ const styles = StyleSheet.create({
   activeTabButton: { borderBottomWidth: 2, borderBottomColor: '#FFF' },
   tabText: { color: '#AAA', fontSize: 15, fontWeight: '500' },
   activeTabText: { color: '#FFF', fontWeight: 'bold' },
-  // 🎯 নতুন ডিজাইনের জন্য স্টাইল (থাম্বনেইল ছাড়া)
-  debugCard: { backgroundColor: '#111', padding: 15, marginBottom: 12, borderRadius: 8, borderWidth: 1, borderColor: '#333', marginHorizontal: 10 },
-  debugTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 8, lineHeight: 22 },
-  debugType: { color: '#AAA', fontSize: 13 },
-  debugValue: { color: '#0F0' }, // লিংকের কালার সবুজ
+  
+  // 🎯 VidMate স্টাইলের নতুন ডিজাইন
+  vidmateCard: { 
+    flexDirection: 'row', 
+    padding: 12, 
+    borderBottomWidth: 1, 
+    borderBottomColor: '#1A1A1A',
+    backgroundColor: '#0F0F0F'
+  },
+  thumbnailWrapper: {
+    width: 150, // থাম্বনেইলের প্রস্থ (VidMate এর মতো ছোট)
+    height: 85, // থাম্বনেইলের উচ্চতা
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#222',
+    position: 'relative'
+  },
+  vidmateThumbnail: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  durationBadge: {
+    position: 'absolute',
+    bottom: 5,
+    right: 5,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    color: '#FFF',
+    fontSize: 11,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 4,
+    fontWeight: 'bold',
+  },
+  infoWrapper: {
+    flex: 1,
+    marginLeft: 12,
+    justifyContent: 'center',
+  },
+  vidmateTitle: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 6,
+    lineHeight: 20,
+  },
+  vidmateMeta: {
+    color: '#AAA',
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  vidmateLink: {
+    color: '#0F0', // লিংক সবুজ রঙে হাইলাইট করা হলো
+    fontSize: 11,
+  },
+  
   emptyStateContainer: { padding: 40, alignItems: 'center', justifyContent: 'center' },
   emptyStateText: { color: '#AAA', fontSize: 16, fontWeight: '500' }
 });
