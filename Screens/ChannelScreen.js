@@ -53,7 +53,7 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🧠 স্মার্ট স্ক্যানার (নতুন থেকে পুরাতন ক্রমানুসারে সাজানোর জন্য unshift ব্যবহৃত হয়েছে)
+  // 🧠 স্মার্ট স্ক্যানার (অক্ষত)
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
     const stack = [{ node: rootNode, currentTitle: 'No Title Found' }];
     const seenIds = new Set();
@@ -92,7 +92,6 @@ export default function ChannelScreen() {
               ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
               : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
 
-          // 🎯 ভিডিও এবং শর্টস দুটোই নতুন থেকে পুরাতন ক্রমে সাজবে
           categorizedData[tabType].unshift({
             id: String(vId),
             title: String(newTitle),
@@ -124,7 +123,7 @@ export default function ChannelScreen() {
     return null;
   };
 
-  // 🔄 API দিয়ে ভিডিও এবং শর্টস রিফ্রেশ করার ফাংশন
+  // 🔄 API দিয়ে রিফ্রেশ করার ফাংশন (অক্ষত)
   const reFetchInitialViaApi = async (currentApiKey, vEndpoint, sEndpoint) => {
     try {
         const fetchTabViaApi = async (endpoint, tabName) => {
@@ -142,18 +141,15 @@ export default function ChannelScreen() {
             const newData = { Videos: [], Shorts: [], VideosToken: null, ShortsToken: null };
             extractDataIteratively(data, newData, tabName);
 
-            // ডুপ্লিকেট রিমুভ
             newData[tabName] = newData[tabName].filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
             return newData;
         };
 
-        // ভিডিও এবং শর্টস একসাথে API এর মাধ্যমে লোড করা হচ্ছে
         const [apiVideos, apiShorts] = await Promise.all([
             fetchTabViaApi(vEndpoint, 'Videos'),
             fetchTabViaApi(sEndpoint, 'Shorts')
         ]);
 
-        // API থেকে ডাটা পেলে সেটি দিয়ে স্ক্রিন রিফ্রেশ করা
         setTabData(prev => ({
             Videos: apiVideos && apiVideos.Videos.length > 0 ? apiVideos.Videos : prev.Videos,
             Shorts: apiShorts && apiShorts.Shorts.length > 0 ? apiShorts.Shorts : prev.Shorts
@@ -255,13 +251,11 @@ export default function ChannelScreen() {
         if (subs) setSubscriberCount(subs);
       }
 
-      // ⚡ যত দ্রুত সম্ভব API রিফ্রেশ ট্রিগার করা (ভিডিও ও শর্টস উভয়ের জন্য)
       const currentApiKey = apiMatch ? apiMatch[1] : null;
       if (currentApiKey) {
           let vEndpoint = null;
           let sEndpoint = null;
 
-          // 🎯 ভিডিও এবং শর্টস উভয়ের ডেটা থেকে Endpoint স্ক্যান করার শক্তিশালী লজিক
           const extractEndpoints = (data) => {
               const tabs = data?.contents?.twoColumnBrowseResultsRenderer?.tabs || 
                            data?.contents?.singleColumnBrowseResultsRenderer?.tabs || [];
@@ -276,10 +270,9 @@ export default function ChannelScreen() {
               });
           };
 
-          extractEndpoints(parsedVideosData); // প্রথমে ভিডিও পেজ থেকে খুঁজবে
-          extractEndpoints(parsedShortsData); // না পেলে শর্টস পেজ থেকেও খুঁজবে
+          extractEndpoints(parsedVideosData); 
+          extractEndpoints(parsedShortsData); 
 
-          // কোনো অপেক্ষা ছাড়াই সরাসরি ব্যাকগ্রাউন্ডে API কল করা হলো
           reFetchInitialViaApi(currentApiKey, vEndpoint, sEndpoint);
       }
 
@@ -332,12 +325,25 @@ export default function ChannelScreen() {
     } catch(e) {}
   };
 
+  // 🎯 সাধারণ ভিডিওর নেভিগেশন
   const handleVideoPress = (item) => {
     DeviceEventEmitter.emit('playVideo', { videoId: item.id, videoData: item });
     navigation.navigate('Player', { videoId: item.id, videoData: item });
   };
 
-  const renderItem = ({ item }) => {
+  // 🎯 Shorts এর জন্য নতুন নেভিগেশন
+  const handleShortPress = (item, index) => {
+    // এখানে ShortsPlayer নামে আপনার স্ক্রিনটি দিতে হবে, ব্যাক করলে স্বয়ংক্রিয়ভাবে আগের জায়গায় আসবে
+    navigation.navigate('ShortsPlayer', { 
+        videoId: item.id, 
+        videoData: item,
+        shortsList: tabData.Shorts, // স্ক্রল/সোয়াইপ করার জন্য পুরো লিস্ট পাঠানো হলো
+        initialIndex: index 
+    });
+  };
+
+  // 🎬 সাধারণ ভিডিওর কার্ড (Horizontal)
+  const renderVideoItem = ({ item }) => {
     return (
       <TouchableOpacity style={styles.vidmateCard} activeOpacity={0.8} onPress={() => handleVideoPress(item)}>
         <View style={styles.thumbnailWrapper}>
@@ -353,6 +359,21 @@ export default function ChannelScreen() {
             {item.publishedTime ? `${item.publishedTime}` : ''}
           </Text>
           <Text style={styles.vidmateLink} numberOfLines={1}>{item.value}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  // 📱 শর্টসের কার্ড (Vertical - 9:16)
+  const renderShortItem = ({ item, index }) => {
+    return (
+      <TouchableOpacity style={styles.shortCard} activeOpacity={0.8} onPress={() => handleShortPress(item, index)}>
+        <View style={styles.shortThumbnailWrapper}>
+          <Image source={{ uri: item.thumbnail }} style={styles.shortThumbnail} />
+        </View>
+        <View style={styles.shortInfo}>
+          <Text style={styles.shortTitle} numberOfLines={2}>{item.title}</Text>
+          <Text style={styles.shortViews}>{item.views}</Text>
         </View>
       </TouchableOpacity>
     );
@@ -423,11 +444,15 @@ export default function ChannelScreen() {
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{channelName}</Text>
       </View>
+      
+      {/* 🎯 FlatList কে ডাইনামিক করা হয়েছে যাতে শর্টসের সময় ৩ কলাম হয়ে যায় */}
       <FlatList 
-        key={activeTab === 'Shorts' ? 'list-shorts' : 'list-videos'} 
+        key={activeTab === 'Shorts' ? 'list-shorts-grid' : 'list-videos'} 
         data={tabData[activeTab] || []} 
-        renderItem={renderItem} 
+        renderItem={activeTab === 'Shorts' ? renderShortItem : renderVideoItem} 
         keyExtractor={(item, index) => item.id + index.toString()} 
+        numColumns={activeTab === 'Shorts' ? 3 : 1}
+        columnWrapperStyle={activeTab === 'Shorts' ? styles.shortsColumnWrapper : undefined}
         ListHeaderComponent={ChannelHeader}
         ListEmptyComponent={renderEmptyComponent}
         ListFooterComponent={renderFooter}
@@ -463,6 +488,7 @@ const styles = StyleSheet.create({
   tabText: { color: '#AAA', fontSize: 15, fontWeight: '500' },
   activeTabText: { color: '#FFF', fontWeight: 'bold' },
   
+  // 🎯 সাধারণ ভিডিওর কার্ড স্টাইল
   vidmateCard: { flexDirection: 'row', padding: 12, borderBottomWidth: 1, borderBottomColor: '#1A1A1A', backgroundColor: '#0F0F0F' },
   thumbnailWrapper: { width: 150, height: 85, borderRadius: 8, overflow: 'hidden', backgroundColor: '#222', position: 'relative' },
   vidmateThumbnail: { width: '100%', height: '100%', resizeMode: 'cover' },
@@ -471,6 +497,47 @@ const styles = StyleSheet.create({
   vidmateTitle: { color: '#FFF', fontSize: 14, fontWeight: 'bold', marginBottom: 6, lineHeight: 20 },
   vidmateMeta: { color: '#AAA', fontSize: 12, marginBottom: 6 },
   vidmateLink: { color: '#0F0', fontSize: 11 },
+
+  // 📱 শর্টসের (Shorts) নতুন স্টাইল
+  shortsColumnWrapper: { 
+    justifyContent: 'flex-start', 
+    paddingHorizontal: 2,
+    marginTop: 10 
+  },
+  shortCard: { 
+    width: (width / 3) - 4, // ৩টি কলাম করার জন্য স্ক্রিনের সাইজ অনুযায়ী ক্যালকুলেশন
+    marginHorizontal: 2, 
+    marginBottom: 15, 
+    backgroundColor: '#0F0F0F' 
+  },
+  shortThumbnailWrapper: {
+    width: '100%',
+    height: ((width / 3) - 4) * 1.77, // ৯:১৬ (Vertical) অনুপাতের জন্য ম্যাজিক রেশিও
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#222'
+  },
+  shortThumbnail: { 
+    width: '100%', 
+    height: '100%', 
+    resizeMode: 'cover' 
+  },
+  shortInfo: { 
+    paddingTop: 8, 
+    paddingHorizontal: 2 
+  },
+  shortTitle: { 
+    color: '#FFF', 
+    fontSize: 13, 
+    fontWeight: '600', 
+    marginBottom: 4,
+    lineHeight: 18 
+  },
+  shortViews: { 
+    color: '#AAA', 
+    fontSize: 11 
+  },
+
   emptyStateContainer: { padding: 40, alignItems: 'center', justifyContent: 'center' },
   emptyStateText: { color: '#AAA', fontSize: 16, fontWeight: '500' }
 });
