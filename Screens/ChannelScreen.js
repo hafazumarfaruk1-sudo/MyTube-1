@@ -53,7 +53,7 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🧠 স্মার্ট স্ক্যানার (আগের মতোই অক্ষত, Load More এবং ক্রম ঠিক রাখার জন্য unshift)
+  // 🧠 স্মার্ট স্ক্যানার 
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
     const stack = [{ node: rootNode, currentTitle: 'No Title Found' }];
     const seenIds = new Set();
@@ -124,7 +124,7 @@ export default function ChannelScreen() {
     return null;
   };
 
-  // 🔄 ১ সেকেন্ড পর API দিয়ে রিফ্রেশ করার ম্যাজিক ফাংশন
+  // 🔄 API দিয়ে রিফ্রেশ করার ফাংশন
   const reFetchInitialViaApi = async (currentApiKey, vEndpoint, sEndpoint) => {
     try {
         const fetchTabViaApi = async (endpoint, tabName) => {
@@ -254,7 +254,7 @@ export default function ChannelScreen() {
         if (subs) setSubscriberCount(subs);
       }
 
-      // ⏱️ ১ সেকেন্ড পর API রিফ্রেশ ট্রিগার করা
+      // ⚡ যত দ্রুত সম্ভব API রিফ্রেশ ট্রিগার করা (কোনো বিলম্ব ছাড়া)
       const currentApiKey = apiMatch ? apiMatch[1] : null;
       if (currentApiKey && parsedVideosData) {
           const tabs = parsedVideosData?.contents?.twoColumnBrowseResultsRenderer?.tabs || [];
@@ -267,9 +267,8 @@ export default function ChannelScreen() {
               if (title.includes('short') || title.includes('শর্ট')) sEndpoint = t?.tabRenderer?.endpoint?.browseEndpoint;
           });
 
-          setTimeout(() => {
-              reFetchInitialViaApi(currentApiKey, vEndpoint, sEndpoint);
-          }, 1000); // ঠিক ১ সেকেন্ড
+          // সরাসরি ফাংশনটি কল করা হলো (ব্যাকগ্রাউন্ডে অ্যাসিনক্রোনাসলি চলবে)
+          reFetchInitialViaApi(currentApiKey, vEndpoint, sEndpoint);
       }
 
     } catch (error) {} finally { setLoading(false); }
