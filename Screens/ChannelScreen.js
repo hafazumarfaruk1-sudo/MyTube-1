@@ -69,32 +69,35 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🧠 One System Extractor: এটি ওয়েব বা API যেকোনো জায়গা থেকে শুধুমাত্র "ID" ও "Token" সূত্র হিসেবে সংগ্রহ করবে
+  // 🧠 One System Extractor: এটি শুধুমাত্র "ID" ও "Token" সূত্র হিসেবে সংগ্রহ করবে (ফ্ললেস ভার্সন)
   const extractClues = (rootNode, categorizedData, tabType) => {
-    const stack = [rootNode];
+    const stack = [{ node: rootNode }];
     const seenIds = new Set();
 
     while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node || typeof node !== 'object') continue;
+      const { node } = stack.pop();
 
       if (Array.isArray(node)) {
-        for (let i = 0; i < node.length; i++) stack.push(node[i]);
-      } else {
+        for (let i = 0; i < node.length; i++) {
+          if (node[i] && typeof node[i] === 'object') stack.push({ node: node[i] });
+        }
+      } else if (node && typeof node === 'object') {
+        
         if (node.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) {
           categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
         }
 
         const vId = node.videoId;
-        // ভিডিও আইডি থাকলে সেটিকে শুধুমাত্র একটি 'সূত্র' হিসেবে লিস্টে যোগ করা হবে, টাইটেল/থাম্বনেইল নয়
-        if (vId && (node.title || node.lengthText || node.thumbnail) && !seenIds.has(vId)) {
+        const isRealVideoObj = vId && (node.title || node.lengthText || node.viewCountText || node.thumbnail || node.publishedTimeText);
+
+        if (isRealVideoObj && !seenIds.has(vId)) {
           seenIds.add(vId);
           categorizedData[tabType].push({ id: String(vId) });
         }
 
         const values = Object.values(node);
         for (let i = 0; i < values.length; i++) {
-          if (typeof values[i] === 'object') stack.push(values[i]);
+          if (values[i] && typeof values[i] === 'object') stack.push({ node: values[i] });
         }
       }
     }
@@ -122,14 +125,14 @@ export default function ChannelScreen() {
     return null;
   };
 
-  // 🚀 One System API Fetcher: সব ভিডিও (প্রথম এবং পরবর্তী) এই ফাংশন দিয়ে API থেকে ফুল ডেটা আনবে
+  // 🚀 One System API Fetcher: সব ভিডিও API থেকে ফুল ডেটা আনবে (অ্যান্টি-বট ব্লক রেসিস্ট্যান্ট)
   const fetchDetailsViaAPI = async (videosList, tabType, currentApiKey, isInitial = false) => {
     if (!videosList || videosList.length === 0 || !currentApiKey) {
-        if (isInitial) setLoading(false);
+        if (isInitial && tabType === activeTab) setLoading(false);
         return;
     }
 
-    const batchSize = 5; // ৫টি করে ব্যাচে ডেটা ফেচ হবে
+    const batchSize = 3; // একবারে ৩টির বেশি রিকোয়েস্ট নয়, যেন ইউটিউব ব্লক না করে
 
     for (let i = 0; i < videosList.length; i += batchSize) {
         const batch = videosList.slice(i, i + batchSize);
@@ -144,6 +147,9 @@ export default function ChannelScreen() {
                         videoId: vid.id
                     })
                 });
+                
+                if (!res.ok) return null; // 429 Error হ্যান্ডেলিং
+                
                 const textData = await res.text();
                 const data = JSON.parse(textData);
                 const details = data?.videoDetails;
@@ -173,17 +179,23 @@ export default function ChannelScreen() {
 
         const validVideos = batchResults.filter(v => v !== null);
 
-        // ডেটা আসার সাথে সাথে UI তে প্রোগ্রেসিভলি আপডেট হবে
-        setTabData(prev => {
-            const currentTabList = prev[tabType] || [];
-            const filteredNew = validVideos.filter(newV => !currentTabList.some(v => v.id === newV.id));
-            return { ...prev, [tabType]: [...currentTabList, ...filteredNew] };
-        });
+        if (validVideos.length > 0) {
+            // ডেটা আসার সাথে সাথে UI তে প্রোগ্রেসিভলি আপডেট হবে
+            setTabData(prev => {
+                const currentTabList = prev[tabType] || [];
+                const filteredNew = validVideos.filter(newV => !currentTabList.some(v => v.id === newV.id));
+                return { ...prev, [tabType]: [...currentTabList, ...filteredNew] };
+            });
+        }
 
         // প্রথম ব্যাচের ডেটা লোড হয়ে গেলেই মেইন লোডার বন্ধ করে ভিডিও দেখানো শুরু হবে
-        if (isInitial && i === 0) setLoading(false);
+        if (isInitial && i === 0 && tabType === activeTab) setLoading(false);
+
+        // 💡 ইউটিউব যেন বট না ভাবে তার জন্য রিকোয়েস্টের মাঝে ৪০০ মিলি-সেকেন্ডের বিরতি
+        await new Promise(resolve => setTimeout(resolve, 400));
     }
-    if (isInitial) setLoading(false);
+    
+    if (isInitial && tabType === activeTab) setLoading(false);
   };
 
   const fetchChannelData = async () => {
