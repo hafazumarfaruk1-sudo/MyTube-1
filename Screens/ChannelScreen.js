@@ -53,7 +53,7 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🧠 স্মার্ট স্ক্যানার: Load More টোকেন এবং অন্যান্য ডেটা অক্ষত আছে 
+  // 🧠 স্মার্ট স্ক্যানার: লুপ অরিজিনাল অবস্থায় রাখা হয়েছে যাতে টোকেন মিস না হয়
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
     const stack = [{ node: rootNode, currentTitle: 'No Title Found' }];
     const seenIds = new Set();
@@ -70,18 +70,17 @@ export default function ChannelScreen() {
       }
 
       if (Array.isArray(node)) {
-        // 🔄 আপডেট: শুধুমাত্র Array-এর ক্ষেত্রে লুপ উল্টো চালানো হচ্ছে যাতে স্ট্যাক থেকে নতুন ভিডিও আগে বের হয়
-        for (let i = node.length - 1; i >= 0; i--) {
+        // লুপ একদম অরিজিনাল রাখা হয়েছে (যাতে Token স্ক্যানিং নষ্ট না হয়)
+        for (let i = 0; i < node.length; i++) {
           if (node[i] && typeof node[i] === 'object') stack.push({ node: node[i], currentTitle: newTitle });
         }
       } else if (node && typeof node === 'object') {
         
-        // ⚠️ Load More Token সেভ করা (এটি আগের মতোই আছে)
+        // ⚠️ Load More Token সেভ করা (একদম অক্ষত)
         if (node.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) {
           categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
         }
 
-        // ভিডিও আইডি পেলে লিংক, টাইটেল এবং অন্যান্য তথ্য সেভ করা
         const hasVideoId = !!node.videoId;
         if (hasVideoId && !seenIds.has(node.videoId)) {
           seenIds.add(node.videoId);
@@ -96,7 +95,9 @@ export default function ChannelScreen() {
               ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
               : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
 
-          categorizedData[tabType].push({
+          // 🎯 ম্যাজিক ফিক্স: push() এর বদলে unshift() ব্যবহার করা হলো
+          // এটি ডেটা পার্সিংয়ের কোনো লজিক না ভেঙেও ভিডিওগুলোকে একদম "নতুন থেকে পুরাতন" ক্রমানুসারে সাজিয়ে দেবে
+          categorizedData[tabType].unshift({
             id: String(vId),
             title: String(newTitle),
             value: `https://www.youtube.com/watch?v=${vId}`, 
@@ -109,9 +110,8 @@ export default function ChannelScreen() {
           });
         }
 
-        // গভীরে যাওয়ার লজিক
         const values = Object.values(node);
-        // 🔄 আপডেট: অবজেক্টের ভেতরে টোকেন খোঁজার লজিক আগের মতোই সোজা রাখা হলো (ঝুঁকি এড়াতে)
+        // লুপ অরিজিনাল রাখা হয়েছে
         for (let i = 0; i < values.length; i++) {
           if (values[i] && typeof values[i] === 'object') stack.push({ node: values[i], currentTitle: newTitle });
         }
@@ -201,7 +201,6 @@ export default function ChannelScreen() {
       categorizedData.Videos = categorizedData.Videos.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
       categorizedData.Shorts = categorizedData.Shorts.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
 
-      // টোকেন সেভ করা হচ্ছে
       setVideoToken(categorizedData.VideosToken);
       setShortToken(categorizedData.ShortsToken);
 
@@ -221,7 +220,6 @@ export default function ChannelScreen() {
     } catch (error) {} finally { setLoading(false); }
   };
 
-  // ⚠️ Load More ফাংশনটি আগের মতোই সম্পূর্ণ অক্ষত আছে 
   const fetchMoreData = async () => {
     const currentToken = activeTab === 'Videos' ? videoToken : shortToken;
     if (!currentToken || isLoadingMore || !apiKey) return;
@@ -246,7 +244,6 @@ export default function ChannelScreen() {
       const filteredNewItems = newData[activeTab].filter(newObj => !tabData[activeTab].some(existingObj => existingObj.id === newObj.id));
       setTabData(prev => ({ ...prev, [activeTab]: [...prev[activeTab], ...filteredNewItems] }));
 
-      // পরবর্তী পেজের টোকেন আপডেট
       if (activeTab === 'Videos') setVideoToken(newData.VideosToken || null);
       else setShortToken(newData.ShortsToken || null);
 
