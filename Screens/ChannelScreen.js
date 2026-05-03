@@ -33,6 +33,7 @@ export default function ChannelScreen() {
   const [shortToken, setShortToken] = useState(null);
   const [apiKey, setApiKey] = useState(null);
 
+  // 🎯 ব্যানার এবং লোগো লোডিংয়ের স্টেট
   const [channelBanner, setChannelBanner] = useState(null);
   const [isBannerLoaded, setIsBannerLoaded] = useState(false);
 
@@ -94,7 +95,7 @@ export default function ChannelScreen() {
               ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
               : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
 
-          // 🎯 ম্যাজিক ফিক্স: শর্টস এর জন্য /shorts/ লিংক তৈরি করা হলো যাতে আপনার শর্টস ফাইলের লজিক সঠিকভাবে কাজ করে
+          // 🎯 শর্টসের জন্য /shorts/ লিংক তৈরি
           const videoUrl = tabType === 'Shorts' 
               ? `https://www.youtube.com/shorts/${vId}` 
               : `https://www.youtube.com/watch?v=${vId}`;
@@ -102,7 +103,7 @@ export default function ChannelScreen() {
           categorizedData[tabType].unshift({
             id: String(vId),
             title: String(newTitle),
-            value: videoUrl, // এখানে সঠিক লিংকটি দেওয়া হলো
+            value: videoUrl,
             channel: channelName,
             duration: duration || (tabType === 'Shorts' ? 'Short' : ''),
             publishedTime: publishedTime || (isLive ? 'Live Now' : ''),
@@ -130,19 +131,29 @@ export default function ChannelScreen() {
     return null;
   };
 
+  // 🎯 ব্যানার লিংক খোঁজার শক্তিশালী ডিপ-স্ক্যানার
   const findBannerUrl = (data) => {
     let url = null;
     const search = (obj) => {
       if (url) return;
       if (!obj || typeof obj !== 'object') return;
 
+      // ইউটিউবের নতুন ও পুরাতন সকল স্ট্রাকচারের নাম যুক্ত করা হয়েছে
       const bannerSources = obj.tvBanner?.thumbnails || 
                             obj.mobileBanner?.thumbnails || 
                             obj.banner?.thumbnails || 
+                            obj.imageBannerViewModel?.image?.sources ||
                             obj.pageHeaderBannerImageViewModel?.image?.sources;
 
       if (bannerSources && Array.isArray(bannerSources) && bannerSources.length > 0) {
-        url = bannerSources[bannerSources.length - 1].url; 
+        let tempUrl = bannerSources[bannerSources.length - 1].url; 
+        
+        // 🎯 ম্যাজিক ফিক্স: লিংকের শুরুতে 'https:' না থাকলে বসিয়ে দেওয়া
+        if (tempUrl.startsWith('//')) {
+            tempUrl = 'https:' + tempUrl;
+        }
+        
+        url = tempUrl;
         return;
       }
 
@@ -361,7 +372,7 @@ export default function ChannelScreen() {
     navigation.navigate('Player', { videoId: item.id, videoData: item });
   };
 
-  // 🎯 Shorts এর নেভিগেশন (সঠিক প্যারামিটার এবং টাইটেল পাঠানো হচ্ছে)
+  // 🎯 Shorts এর নেভিগেশন
   const handleShortPress = (item, index) => {
     navigation.navigate('Shorts', { 
         videoId: item.id, 
@@ -421,17 +432,22 @@ export default function ChannelScreen() {
 
   const ChannelHeader = () => (
     <View>
+      {/* 🎯 ব্যানার এবং লোগো প্লেইসহোল্ডার (Blurred) */}
       <View style={styles.bannerContainer}>
+        {/* অ্যাপ লোগো (ব্যানার না আসা পর্যন্ত এটি দেখাবে) */}
         <Image 
             source={{ uri: 'https://via.placeholder.com/800x200/222222/FFFFFF?text=App+Logo' }} 
             style={[styles.bannerImage, { position: 'absolute' }]} 
             blurRadius={15} 
         />
+        
+        {/* আসল ব্যানার */}
         {channelBanner ? (
             <Image 
                 source={{ uri: channelBanner }} 
                 style={[styles.bannerImage, { opacity: isBannerLoaded ? 1 : 0 }]} 
                 onLoad={() => setIsBannerLoaded(true)}
+                onError={() => setIsBannerLoaded(true)} // 👈 ফিক্স: লোড ফেইল করলেও এটি দৃশ্যমান করার চেষ্টা করবে
             />
         ) : null}
       </View>
