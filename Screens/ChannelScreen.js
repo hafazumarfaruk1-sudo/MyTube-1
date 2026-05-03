@@ -26,13 +26,16 @@ export default function ChannelScreen() {
   const [isLiveChannel, setIsLiveChannel] = useState(false); 
   const [liveVideoData, setLiveVideoData] = useState(null);
   const [thumbQuality, setThumbQuality] = useState('High');
-  const [channelBanner, setChannelBanner] = useState('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop');
   const [subscriberCount, setSubscriberCount] = useState('N/A');
 
   const [tabData, setTabData] = useState({ Videos: [], Shorts: [] });
   const [videoToken, setVideoToken] = useState(null);
   const [shortToken, setShortToken] = useState(null);
   const [apiKey, setApiKey] = useState(null);
+
+  // 🎯 ব্যানার লোডিংয়ের জন্য নতুন স্টেট
+  const [channelBanner, setChannelBanner] = useState(null);
+  const [isBannerLoaded, setIsBannerLoaded] = useState(false);
 
   useEffect(() => {
     fetchChannelData();
@@ -240,12 +243,24 @@ export default function ChannelScreen() {
 
       setTabData({ Videos: categorizedData.Videos, Shorts: categorizedData.Shorts });
 
+      // 🎯 ব্যানার বের করার শক্তিশালী লজিক (আগের লজিক অক্ষত রেখে পরিবর্ধিত করা হয়েছে)
       if (parsedVideosData) {
         const header = parsedVideosData?.header?.c4TabbedHeaderRenderer || parsedVideosData?.header?.pageHeaderRenderer;
         let bannerSrc = null;
-        if (header?.banner?.thumbnails) bannerSrc = header.banner.thumbnails;
-        else if (header?.pageHeaderBanner?.pageHeaderBannerImageViewModel?.image?.sources) bannerSrc = header.pageHeaderBanner.pageHeaderBannerImageViewModel.image.sources;
-        if (bannerSrc && bannerSrc.length > 0) setChannelBanner(bannerSrc[bannerSrc.length - 1].url);
+        
+        if (header?.banner?.thumbnails) {
+            bannerSrc = header.banner.thumbnails;
+        } else if (header?.mobileBanner?.thumbnails) {
+            bannerSrc = header.mobileBanner.thumbnails;
+        } else if (header?.tvBanner?.thumbnails) {
+            bannerSrc = header.tvBanner.thumbnails;
+        } else if (header?.pageHeaderBanner?.pageHeaderBannerImageViewModel?.image?.sources) {
+            bannerSrc = header.pageHeaderBanner.pageHeaderBannerImageViewModel.image.sources;
+        }
+
+        if (bannerSrc && bannerSrc.length > 0) {
+            setChannelBanner(bannerSrc[bannerSrc.length - 1].url);
+        }
 
         const subs = header?.subscriberCountText?.simpleText || header?.content?.pageHeaderViewModel?.metadata?.metadataRows?.[0]?.metadataParts?.[0]?.text?.content;
         if (subs) setSubscriberCount(subs);
@@ -325,24 +340,21 @@ export default function ChannelScreen() {
     } catch(e) {}
   };
 
-  // 🎯 সাধারণ ভিডিওর নেভিগেশন
   const handleVideoPress = (item) => {
     DeviceEventEmitter.emit('playVideo', { videoId: item.id, videoData: item });
     navigation.navigate('Player', { videoId: item.id, videoData: item });
   };
 
-  // 🎯 Shorts এর জন্য নতুন নেভিগেশন
+  // 🎯 Shorts এর নতুন নেভিগেশন (ShortsPlayer এর বদলে Shorts)
   const handleShortPress = (item, index) => {
-    // এখানে ShortsPlayer নামে আপনার স্ক্রিনটি দিতে হবে, ব্যাক করলে স্বয়ংক্রিয়ভাবে আগের জায়গায় আসবে
-    navigation.navigate('ShortsPlayer', { 
+    navigation.navigate('Shorts', { 
         videoId: item.id, 
         videoData: item,
-        shortsList: tabData.Shorts, // স্ক্রল/সোয়াইপ করার জন্য পুরো লিস্ট পাঠানো হলো
+        shortsList: tabData.Shorts, 
         initialIndex: index 
     });
   };
 
-  // 🎬 সাধারণ ভিডিওর কার্ড (Horizontal)
   const renderVideoItem = ({ item }) => {
     return (
       <TouchableOpacity style={styles.vidmateCard} activeOpacity={0.8} onPress={() => handleVideoPress(item)}>
@@ -364,16 +376,12 @@ export default function ChannelScreen() {
     );
   };
 
-  // 📱 শর্টসের কার্ড (Vertical - 9:16)
+  // 📱 শর্টসের কার্ড (শুধুমাত্র থাম্বনেইল, কোনো টাইটেল/ভিউ থাকবে না)
   const renderShortItem = ({ item, index }) => {
     return (
       <TouchableOpacity style={styles.shortCard} activeOpacity={0.8} onPress={() => handleShortPress(item, index)}>
         <View style={styles.shortThumbnailWrapper}>
           <Image source={{ uri: item.thumbnail }} style={styles.shortThumbnail} />
-        </View>
-        <View style={styles.shortInfo}>
-          <Text style={styles.shortTitle} numberOfLines={2}>{item.title}</Text>
-          <Text style={styles.shortViews}>{item.views}</Text>
         </View>
       </TouchableOpacity>
     );
@@ -395,7 +403,24 @@ export default function ChannelScreen() {
 
   const ChannelHeader = () => (
     <View>
-      <Image source={{ uri: channelBanner }} style={styles.bannerImage} />
+      {/* 🎯 ব্যানার এবং লোগো প্লেইসহোল্ডার (Blurred) */}
+      <View style={styles.bannerContainer}>
+        {/* এই Image টি আপনার অ্যাপের লোগো হিসেবে থাকবে, যা ব্যানার লোড না হওয়া পর্যন্ত ঝাপসা দেখাবে */}
+        <Image 
+            source={{ uri: 'https://via.placeholder.com/800x200/222222/FFFFFF?text=App+Logo' }} // 👈 এখানে আপনার লোগো দিন, যেমন: require('./assets/logo.png')
+            style={[styles.bannerImage, { position: 'absolute' }]} 
+            blurRadius={10} 
+        />
+        {/* আসল ব্যানার পেলে এটি দেখাবে */}
+        {channelBanner ? (
+            <Image 
+                source={{ uri: channelBanner }} 
+                style={[styles.bannerImage, { opacity: isBannerLoaded ? 1 : 0 }]} 
+                onLoad={() => setIsBannerLoaded(true)}
+            />
+        ) : null}
+      </View>
+
       <View style={styles.channelProfileSection}>
         <TouchableOpacity 
           style={styles.avatarWrapper} 
@@ -445,7 +470,6 @@ export default function ChannelScreen() {
         <Text style={styles.headerTitle} numberOfLines={1}>{channelName}</Text>
       </View>
       
-      {/* 🎯 FlatList কে ডাইনামিক করা হয়েছে যাতে শর্টসের সময় ৩ কলাম হয়ে যায় */}
       <FlatList 
         key={activeTab === 'Shorts' ? 'list-shorts-grid' : 'list-videos'} 
         data={tabData[activeTab] || []} 
@@ -470,7 +494,11 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', height: 50, paddingHorizontal: 10 },
   headerIcon: { padding: 10 },
   headerTitle: { flex: 1, color: '#FFF', fontSize: 18, fontWeight: 'bold', marginLeft: 5 },
-  bannerImage: { width: width, height: width * 0.25, resizeMode: 'cover', backgroundColor: '#222' },
+  
+  // 🎯 ব্যানার কন্টেইনার স্টাইল
+  bannerContainer: { width: width, height: width * 0.25, backgroundColor: '#222', position: 'relative' },
+  bannerImage: { width: '100%', height: '100%', resizeMode: 'cover' },
+  
   channelProfileSection: { flexDirection: 'row', padding: 15, alignItems: 'center' },
   avatarWrapper: { marginRight: 15 },
   channelLogoLarge: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#333' },
@@ -488,7 +516,6 @@ const styles = StyleSheet.create({
   tabText: { color: '#AAA', fontSize: 15, fontWeight: '500' },
   activeTabText: { color: '#FFF', fontWeight: 'bold' },
   
-  // 🎯 সাধারণ ভিডিওর কার্ড স্টাইল
   vidmateCard: { flexDirection: 'row', padding: 12, borderBottomWidth: 1, borderBottomColor: '#1A1A1A', backgroundColor: '#0F0F0F' },
   thumbnailWrapper: { width: 150, height: 85, borderRadius: 8, overflow: 'hidden', backgroundColor: '#222', position: 'relative' },
   vidmateThumbnail: { width: '100%', height: '100%', resizeMode: 'cover' },
@@ -498,21 +525,21 @@ const styles = StyleSheet.create({
   vidmateMeta: { color: '#AAA', fontSize: 12, marginBottom: 6 },
   vidmateLink: { color: '#0F0', fontSize: 11 },
 
-  // 📱 শর্টসের (Shorts) নতুন স্টাইল
+  // 📱 শর্টস কার্ডের স্টাইল (শুধুমাত্র থাম্বনেইল)
   shortsColumnWrapper: { 
     justifyContent: 'flex-start', 
     paddingHorizontal: 2,
     marginTop: 10 
   },
   shortCard: { 
-    width: (width / 3) - 4, // ৩টি কলাম করার জন্য স্ক্রিনের সাইজ অনুযায়ী ক্যালকুলেশন
+    width: (width / 3) - 4, 
     marginHorizontal: 2, 
-    marginBottom: 15, 
+    marginBottom: 4, // নিচে জায়গা কমিয়ে দেওয়া হলো কারণ লেখা নেই 
     backgroundColor: '#0F0F0F' 
   },
   shortThumbnailWrapper: {
     width: '100%',
-    height: ((width / 3) - 4) * 1.77, // ৯:১৬ (Vertical) অনুপাতের জন্য ম্যাজিক রেশিও
+    height: ((width / 3) - 4) * 1.77, 
     borderRadius: 8,
     overflow: 'hidden',
     backgroundColor: '#222'
@@ -521,21 +548,6 @@ const styles = StyleSheet.create({
     width: '100%', 
     height: '100%', 
     resizeMode: 'cover' 
-  },
-  shortInfo: { 
-    paddingTop: 8, 
-    paddingHorizontal: 2 
-  },
-  shortTitle: { 
-    color: '#FFF', 
-    fontSize: 13, 
-    fontWeight: '600', 
-    marginBottom: 4,
-    lineHeight: 18 
-  },
-  shortViews: { 
-    color: '#AAA', 
-    fontSize: 11 
   },
 
   emptyStateContainer: { padding: 40, alignItems: 'center', justifyContent: 'center' },
