@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, SafeAreaView, Platform, StatusBar, Keyboard, ActivityIndicator, Image, Dimensions, InteractionManager } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useIsFocused, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useIsFocused } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
@@ -35,16 +35,6 @@ export default function SearchSettingScreen() {
     }
   }, []);
 
-  // ফিরে আসার পর ফ্রিজ হওয়া রোধ করতে InteractionManager রিমুভ করা হয়েছে
-  useFocusEffect(
-    useCallback(() => {
-      if (showResults) {
-        Keyboard.dismiss();
-        inputRef.current?.blur();
-      }
-    }, [showResults])
-  );
-
   useEffect(() => {
     const loadData = async () => {
       try {
@@ -70,6 +60,13 @@ export default function SearchSettingScreen() {
 
   const saveHistory = async (text) => {
     const updatedHistory = [text, ...history.filter(item => item !== text)].slice(0, 15);
+    setHistory(updatedHistory);
+    await AsyncStorage.setItem('myTubeSearchHistory', JSON.stringify(updatedHistory));
+  };
+
+  // [নতুন লজিক]: হিস্ট্রি থেকে নির্দিষ্ট আইটেম ডিলিট করা
+  const removeHistoryItem = async (itemToRemove) => {
+    const updatedHistory = history.filter(item => item !== itemToRemove);
     setHistory(updatedHistory);
     await AsyncStorage.setItem('myTubeSearchHistory', JSON.stringify(updatedHistory));
   };
@@ -227,32 +224,29 @@ export default function SearchSettingScreen() {
     return { finalFeed, nextToken };
   };
 
+  // [আপডেট লজিক]: ন্যাভিগেশনের সময় requestAnimationFrame ব্যবহার করা হলো যাতে ফ্রিজ না হয়
   const navigateToPlayer = (item) => {
     Keyboard.dismiss();
     inputRef.current?.blur();
-    InteractionManager.runAfterInteractions(() => {
+    requestAnimationFrame(() => {
         navigation.navigate('Player', { videoId: item.id, videoData: item });
+    });
+  };
+
+  const navigateToShorts = (short) => {
+    Keyboard.dismiss();
+    inputRef.current?.blur();
+    requestAnimationFrame(() => {
+        navigation.navigate('Shorts', { initialVideoId: short.id, videoId: short.id, videoData: short });
     });
   };
 
   const navigateToChannel = (item) => {
     Keyboard.dismiss();
     inputRef.current?.blur();
-    InteractionManager.runAfterInteractions(() => {
+    requestAnimationFrame(() => {
         navigation.navigate('Channel', { channelName: item.channel || item.title, channelAvatar: item.avatar, channelUrl: item.channelUrl });
     });
-  };
-
-  // [আপডেট]: শুধুমাত্র শর্টসের জন্য সম্পর্ক ছিন্ন করা হলো
-  const navigateToShorts = (short) => {
-    Keyboard.dismiss();
-    inputRef.current?.blur();
-    
-    // setTimeout ব্যবহার করে মেইন থ্রেড থেকে নেভিগেশনকে আলাদা (Decouple) করা হলো
-    // এর ফলে ব্যাক করলে শর্টস স্ক্রিনের লোড সার্চ স্ক্রিনকে আর আটকে রাখবে না
-    setTimeout(() => {
-      navigation.navigate('Shorts', { initialVideoId: short.id, videoId: short.id, videoData: short });
-    }, 10); 
   };
 
   const renderItem = ({ item }) => {
@@ -359,10 +353,20 @@ export default function SearchSettingScreen() {
             data={query ? suggestions : history} 
             keyExtractor={(item, index) => index.toString()} 
             renderItem={({item}) => (
-              <TouchableOpacity style={styles.historyItem} onPress={() => handleSearchSubmit(item)}>
-                <Ionicons name={query ? "search-outline" : "time-outline"} size={22} color="#AAA" />
-                <Text style={styles.historyText}>{item}</Text>
-              </TouchableOpacity>
+              // [নতুন লজিক]: হিস্ট্রি আইটেম এবং ডিলিট বাটন আলাদা করা হলো
+              <View style={styles.historyRowContainer}>
+                <TouchableOpacity style={styles.historyClickableArea} onPress={() => handleSearchSubmit(item)}>
+                  <Ionicons name={query ? "search-outline" : "time-outline"} size={22} color="#AAA" />
+                  <Text style={styles.historyText}>{item}</Text>
+                </TouchableOpacity>
+                
+                {/* সার্চ না করা অবস্থায় সাদা ক্রস বাটন দেখাবে */}
+                {!query && (
+                  <TouchableOpacity style={styles.deleteBtn} onPress={() => removeHistoryItem(item)}>
+                    <Ionicons name="close" size={22} color="#FFF" />
+                  </TouchableOpacity>
+                )}
+              </View>
           )} keyboardShouldPersistTaps="handled" />
         ) : (
           <>
@@ -416,8 +420,12 @@ const styles = StyleSheet.create({
   },
   input: { flex: 1, color: '#FFF', fontSize: 14, paddingVertical: 0 },
   
-  historyItem: { flexDirection: 'row', alignItems: 'center', padding: 15 },
+  // হিস্ট্রি আইটেম এবং ডিলিট বাটনের স্টাইল
+  historyRowContainer: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 15 },
+  historyClickableArea: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   historyText: { color: '#FFF', fontSize: 16, marginLeft: 15 },
+  deleteBtn: { padding: 5, paddingLeft: 15 },
+
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   videoCard: { marginBottom: 15 },
   thumbnail: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#111' },
