@@ -215,8 +215,8 @@ export default function LiveScreen() {
       </TouchableOpacity>
 
       <View style={styles.videoInfo}>
-        {/* [UPDATED]: এখানে 'ChannelScreen' এর জায়গায় 'Channel' দেওয়া হয়েছে এবং ভিডিও লিংক পাস করা হয়েছে */}
-        <TouchableOpacity onPress={() => navigation.navigate('Channel', { channelId: item.channelId, channelName: item.channel, avatar: item.avatar, videoLink: `https://www.youtube.com/watch?v=${item.id}` })}>
+        {/* এখানে ChannelScreen এর পরিবর্তে Channel এবং videoLink যুক্ত করা হয়েছে */}
+        <TouchableOpacity onPress={() => navigation.navigate('Channel', { channelId: item.channelId, channelName: item.channel, avatar: item.avatar, videoId: item.id, videoLink: `https://www.youtube.com/watch?v=${item.id}` })}>
           <Image source={{ uri: item.avatar }} style={styles.channelAvatar} />
         </TouchableOpacity>
         
@@ -224,8 +224,8 @@ export default function LiveScreen() {
           <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Player', { videoId: item.id, videoData: item })}>
             <Text style={styles.title} numberOfLines={2}>{item.title}</Text>
           </TouchableOpacity>
-          {/* [UPDATED]: এখানেও 'ChannelScreen' এর জায়গায় 'Channel' দেওয়া হয়েছে এবং ভিডিও লিংক পাস করা হয়েছে */}
-          <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Channel', { channelId: item.channelId, channelName: item.channel, avatar: item.avatar, videoLink: `https://www.youtube.com/watch?v=${item.id}` })}>
+          {/* এখানেও ChannelScreen এর পরিবর্তে Channel এবং videoLink যুক্ত করা হয়েছে */}
+          <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Channel', { channelId: item.channelId, channelName: item.channel, avatar: item.avatar, videoId: item.id, videoLink: `https://www.youtube.com/watch?v=${item.id}` })}>
             <Text style={styles.meta}>{item.channel} • {item.views} • {item.timeText}</Text>
           </TouchableOpacity>
         </View>
