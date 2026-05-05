@@ -145,7 +145,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
                       'ytm-dislike-button-renderer, ytm-comment-button-renderer, ytm-share-button-renderer, ' +
                       'ytm-remix-button-renderer, [aria-label*="Like"], [aria-label*="Comment"], [aria-label*="Share"], ' +
                       '[aria-label*="লাইক"], [aria-label*="কমেন্ট"], ' +
-                      'ytm-reel-player-overlay-main-content, .reel-player-overlay-main-content, ' + // চ্যানেল লোগো এবং টেক্সট হাইড করার সিলেক্টর
+                      'ytm-reel-player-overlay-main-content, .reel-player-overlay-main-content, ' + 
                       'ytp-ad-module, .ytp-ad-overlay-container, ytm-promoted-sparkles-web-renderer, ytm-companion-ad-renderer, ad-slot, [id^="ad-"] ' +
                       '{ display: none !important; opacity: 0 !important; width: 0 !important; height: 0 !important; visibility: hidden !important; pointer-events: none !important; z-index: -9999 !important; }';
             
@@ -240,7 +240,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
 
   return (
     <View style={styles.container}>
-      <StatusBar backgroundColor="#0F0F0F" barStyle="light-content" translucent={true} />
+      <StatusBar backgroundColor="#0F0F0F" barStyle="light-content" />
       
       <View style={styles.header}>
         <View style={styles.logoContainer}>
@@ -266,7 +266,6 @@ export default function ShortsScreen({ initialVideoId, route }) {
         containerStyle={{ flex: 1 }} 
         incognito={true} 
         cacheEnabled={false} 
-        cacheMode="LOAD_NO_CACHE"
       />
 
       {showActionBtns && currentChannel.name !== '' && currentChannel.name !== 'Unknown Channel' && (
@@ -324,7 +323,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', 
     alignItems: 'center', 
     paddingHorizontal: 12, 
-    height: 52, // উচ্চতা ফিক্স করে দেওয়া হয়েছে যেন অতিরিক্ত জায়গা না নেয়
+    height: 52, 
     borderBottomWidth: 1, 
     borderBottomColor: '#222', 
     width: '100%', 
