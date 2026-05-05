@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, SafeAreaView, StatusBar, ActivityIndicator, Platform, Dimensions, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, StatusBar, ActivityIndicator, Platform, Dimensions, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
 import * as NavigationBar from 'expo-navigation-bar';
@@ -7,7 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import SettingsScreen from '../Settings/SettingsScreen';
 import ShortsScreen from './ShortsScreen'; 
-import LiveScreen from './livescreen'; 
+import LiveScreen from './livescreen';
 
 const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const FEED_TOPICS = [ "trending bangladesh", "bangla natok 2026", "bangla new song", "somoy tv live", "cricket highlights", "bangla waz short", "bengali vlog", "bangla news today" ];
@@ -15,7 +15,8 @@ const FEED_TOPICS = [ "trending bangladesh", "bangla natok 2026", "bangla new so
 global.aiMemory = global.aiMemory || {};
 global.seenVideoIds = global.seenVideoIds || new Set(); 
 
-const { width } = Dimensions.get('window');
+// ডিভাইসের স্ক্রিনের হাইট এবং উইডথ নেওয়া হচ্ছে
+const { width, height } = Dimensions.get('window');
 
 export default function HomeScreen({ route }) {
   const navigation = useNavigation();
@@ -62,10 +63,10 @@ export default function HomeScreen({ route }) {
 
     if (isFocused) {
       loadGlobalData();
-      // [FIXED]: নিচের সিস্টেম ব্যাক বাটনগুলো কালো দাগের মাঝে রাখার ব্যবস্থা করা হলো
+      // নেভিগেশন বার ভিজিবল করে সেটির ব্যাকগ্রাউন্ড পুরোপুরি কালো করা হলো
       if (Platform.OS === 'android') {
         NavigationBar.setVisibilityAsync("visible");
-        NavigationBar.setBackgroundColorAsync("#000000"); // কালো ব্যাকগ্রাউন্ড
+        NavigationBar.setBackgroundColorAsync("#000000"); 
         NavigationBar.setButtonStyleAsync("light");
       }
     }
@@ -80,7 +81,6 @@ export default function HomeScreen({ route }) {
 
   useEffect(() => {
     if (activeQuery) fetchRealVideos(activeQuery, true);
-    // [FIXED]: এখান থেকে hide করার কোডটি মুছে ফেলা হয়েছে যাতে বাটনগুলো মিশে না যায়
   }, [activeQuery]);
 
   const handleRefresh = async () => {
@@ -176,8 +176,10 @@ export default function HomeScreen({ route }) {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar backgroundColor="#0F0F0F" barStyle="light-content" translucent={true} />
+    // SafeAreaView এর পরিবর্তে View ব্যবহার করা হয়েছে যাতে আপনার হিসাব করা প্যাডিং ঠিকমতো কাজ করে
+    <View style={styles.container}>
+      {/* স্ট্যাটাস বার ট্রান্সপারেন্ট রাখা হয়েছে যাতে ব্যাকগ্রাউন্ডের কালো অংশ দেখায় */}
+      <StatusBar backgroundColor="transparent" barStyle="light-content" translucent={true} />
 
       {activeTab !== 'Shorts' && activeTab !== 'Live' && activeTab !== 'ME' && activeTab !== 'Settings' && (
         <View style={styles.header}>
@@ -252,12 +254,17 @@ export default function HomeScreen({ route }) {
            <Text style={[styles.tabText, (activeTab==='ME' || activeTab==='Settings') && {color:'#FFF'}]}>ME</Text>
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000', paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 },
+  container: { 
+    flex: 1, 
+    backgroundColor: '#000000', // ব্যাকগ্রাউন্ড কালো রাখা হয়েছে
+    paddingTop: height / 32,    // আপনার নির্দেশনা অনুযায়ী: স্ক্রিনের ৩২ ভাগের ১ ভাগ উপরের টাইমের জন্য
+    paddingBottom: height / 28  // আপনার নির্দেশনা অনুযায়ী: স্ক্রিনের ২৮ ভাগের ১ ভাগ নিচের ব্যাক বাটনের জন্য
+  },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#222', width: '100%', backgroundColor: '#0F0F0F' },
   logoContainer: { flexDirection: 'row', alignItems: 'center', width: 105 },
   logoText: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 4 },
