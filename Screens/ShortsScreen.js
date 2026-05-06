@@ -21,6 +21,9 @@ export default function ShortsScreen({ initialVideoId, route }) {
   const [shortsLoading, setShortsLoading] = useState(true);
   const [uaReady, setUaReady] = useState(false); 
 
+  // শুধুমাত্র কোনো নির্দিষ্ট ভিডিও লিংক ছাড়া (Directly) ঢুকলেই মিউট আইকন দেখানোর লজিক
+  const [showMuteIcon, setShowMuteIcon] = useState(!initialVideoId && !route?.params?.videoId);
+
   const [showActionBtns, setShowActionBtns] = useState(false);
   const [deviceUserAgent, setDeviceUserAgent] = useState(UAS.normal);
   const [webviewKey, setWebviewKey] = useState(Date.now().toString());
@@ -58,6 +61,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
     if (isFocused && isActive) {
       setUaReady(false); 
       setShortsLoading(true);
+      setShowMuteIcon(!initialVideoId && !route?.params?.videoId); // নিশ্চিতকরণ
 
       const qualityVal = global.shortVideoQuality || 'Normal Video Quality';
       let newUA = UAS.normal;
@@ -91,7 +95,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
 
       setTimeout(() => setUaReady(true), 100);
     }
-  }, [isFocused, isActive]);
+  }, [isFocused, isActive, initialVideoId, route]);
 
   const restartActionTimer = () => {
     setShowActionBtns(false);
@@ -166,6 +170,19 @@ export default function ShortsScreen({ initialVideoId, route }) {
 
         executeHideProtocol();
 
+        // ইউজার ইন্টারেকশন ট্র্যাকিং (যেকোনো টাচে মিউট আইকন গায়েব করার জন্য)
+        document.addEventListener('touchstart', function() {
+            if (window.ReactNativeWebView) {
+                window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'USER_INTERACTION' }));
+            }
+        }, { passive: true });
+        
+        document.addEventListener('click', function() {
+            if (window.ReactNativeWebView) {
+                window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'USER_INTERACTION' }));
+            }
+        }, { passive: true });
+
         var observer = new MutationObserver(function(mutations) {
             executeHideProtocol(); 
             try {
@@ -210,6 +227,9 @@ export default function ShortsScreen({ initialVideoId, route }) {
     else {
         try {
           const data = JSON.parse(rawData);
+          if (data.type === 'USER_INTERACTION') {
+              setShowMuteIcon(false); // যেকোনো টাচ হলে মিউট আইকন গায়েব হয়ে যাবে
+          }
           if (data.type === 'NEW_VIDEO_STARTED') if (data.url) setCurrentUrl(data.url); 
           if (data.type === 'CHANNEL_SYNC' && data.name) {
               if (currentChannelNameRef.current !== data.name) {
@@ -234,7 +254,10 @@ export default function ShortsScreen({ initialVideoId, route }) {
   }
 
   return (
-    <View style={styles.container}>
+    <View 
+      style={styles.container}
+      onTouchStart={() => setShowMuteIcon(false)} // নেটিভ ভিউ এর উপর টাচ করলেও যেন আইকন গায়েব হয়
+    >
       <StatusBar backgroundColor="#0F0F0F" barStyle="light-content" />
 
       <View style={styles.header}>
@@ -262,6 +285,12 @@ export default function ShortsScreen({ initialVideoId, route }) {
         incognito={true} 
         cacheEnabled={false} 
       />
+
+      {showMuteIcon && (
+        <View style={styles.muteIconContainer} pointerEvents="none">
+          <Ionicons name="volume-mute" size={24} color="#FFF" />
+        </View>
+      )}
 
       {showActionBtns && currentChannel.name !== '' && currentChannel.name !== 'Unknown Channel' && (
         <View style={styles.actionRowContainer} pointerEvents="box-none">
@@ -326,5 +355,14 @@ const styles = StyleSheet.create({
   nativeSubText: { color: '#FFF', fontWeight: 'bold', fontSize: 13 },
   nativeSubbedText: { color: '#AAA' },
   nativeShareBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 25, marginLeft: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
-  nativeShareText: { color: '#FFF', fontWeight: 'bold', fontSize: 13, marginLeft: 6 }
+  nativeShareText: { color: '#FFF', fontWeight: 'bold', fontSize: 13, marginLeft: 6 },
+  muteIconContainer: {
+    position: 'absolute',
+    top: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 65 : 100, // হেডারের ঠিক নিচে ডান সাইডে
+    right: 15,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    padding: 8,
+    borderRadius: 20,
+    zIndex: 99999,
+  }
 });
