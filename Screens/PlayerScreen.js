@@ -18,7 +18,6 @@ export default function PlayerScreen({ route, navigation }) {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isExpandedDesc, setIsExpandedDesc] = useState(false);
 
-  // [NEW]: ৩ সেকেন্ডের ইনিশিয়াল লোডিং স্টেট
   const [isInitialLoading, setIsInitialLoading] = useState(true);
 
   const [showDownloadModal, setShowDownloadModal] = useState(false);
@@ -46,11 +45,9 @@ export default function PlayerScreen({ route, navigation }) {
     fetchRelatedVideos(false);
 
     if (videoId && videoData) {
-        // [MODIFIED]: রিকোয়েস্ট সাথে সাথেই সার্ভারে পাঠানো হচ্ছে
         DeviceEventEmitter.emit('playVideo', { videoId: videoId, videoData: videoData });
         setIsAudioMode(videoData?.type === 'audio');
 
-        // [MODIFIED]: স্ক্রিনে ৩ সেকেন্ডের লোডিং ইফেক্ট রাখা হয়েছে
         setIsInitialLoading(true);
         const timer = setTimeout(() => {
             setIsInitialLoading(false);
@@ -103,7 +100,7 @@ export default function PlayerScreen({ route, navigation }) {
       const resJson = await response.json();
 
       if (resJson.success) {
-          // সাইলেন্ট ডাউনলোড লজিক
+          // সাইলেন্ট ডাউনলোড
       }
     } catch (error) {
       Alert.alert("সার্ভার এরর", "সার্ভারের সাথে কানেক্ট করা যায়নি।");
@@ -195,31 +192,33 @@ export default function PlayerScreen({ route, navigation }) {
             <Text style={styles.mainTitle} numberOfLines={isExpandedDesc ? null : 2}>{videoData?.title}</Text>
          </TouchableOpacity>
       </View>
-      <View style={styles.metaRow}>
-         <Text style={styles.mainViews}>{videoData?.views} {videoData?.publishedTime ? `• ${videoData.publishedTime}` : ''}</Text>
-         <Text style={styles.moreText}>...more</Text>
-      </View>
       
-      <View style={styles.smartActionRow}>
-         <TouchableOpacity 
-            style={[styles.smartBtn, isAudioMode ? styles.smartBtnActive : null]} 
-            onPress={handleBackgroundPlay}
-            activeOpacity={0.8}
-         >
-            <Ionicons name="headset" size={20} color={isAudioMode ? "#FFF" : "#DDD"} />
-            <Text style={[styles.smartBtnText, isAudioMode ? {color: '#FFF'} : null]}>অডিও মোড</Text>
-         </TouchableOpacity>
+      {/* এখানে ভিউজ এবং ডানপাশে আইকনগুলো রাখা হয়েছে */}
+      <View style={styles.metaActionRow}>
+         <View style={styles.metaLeft}>
+             <Text style={styles.mainViews}>{videoData?.views} {videoData?.publishedTime ? `• ${videoData.publishedTime}` : ''}</Text>
+             <Text style={styles.moreText}>...more</Text>
+         </View>
+         
+         <View style={styles.actionRight}>
+            {!videoData.localUri && (
+              <TouchableOpacity 
+                 style={styles.iconOnlyBtn} 
+                 onPress={() => { setShowDownloadModal(true); setDownloadStep('selection'); }}
+                 activeOpacity={0.6}
+              >
+                 <Ionicons name="download-outline" size={24} color="#FFF" />
+              </TouchableOpacity>
+            )}
 
-         {!videoData.localUri && (
-           <TouchableOpacity 
-              style={[styles.smartBtn, {marginLeft: 12}]} 
-              onPress={() => { setShowDownloadModal(true); setDownloadStep('selection'); }}
-              activeOpacity={0.8}
-           >
-              <Ionicons name="download" size={20} color="#DDD" />
-              <Text style={styles.smartBtnText}>ডাউনলোড</Text>
-           </TouchableOpacity>
-         )}
+            <TouchableOpacity 
+               style={styles.iconOnlyBtn} 
+               onPress={handleBackgroundPlay}
+               activeOpacity={0.6}
+            >
+               <Ionicons name={isAudioMode ? "headset" : "headset-outline"} size={24} color={isAudioMode ? "#00BFA5" : "#FFF"} />
+            </TouchableOpacity>
+         </View>
       </View>
 
       <View style={styles.channelRow}>
@@ -244,7 +243,6 @@ export default function PlayerScreen({ route, navigation }) {
     <SafeAreaView style={styles.container}>
       <StatusBar hidden={true} /> 
       
-      {/* গ্লোবাল সার্চ হেডার */}
       <View style={styles.header}>
         <View style={styles.logoContainer}>
            <TouchableOpacity onPress={() => navigation.goBack()} style={{marginRight: 10}}>
@@ -260,7 +258,6 @@ export default function PlayerScreen({ route, navigation }) {
       </View>
 
       <View style={styles.playerWrapper}>
-          {/* [NEW]: ৩ সেকেন্ডের ইনিশিয়াল লোডার ওভারলে */}
           {isInitialLoading && (
               <View style={styles.initialPlayerLoader}>
                   <ActivityIndicator size="large" color="#00BFA5" />
@@ -269,7 +266,6 @@ export default function PlayerScreen({ route, navigation }) {
           )}
       </View>
       
-      {/* [NEW]: লোডিং শেষ না হওয়া পর্যন্ত কন্টেন্ট হাইড রাখা */}
       {isInitialLoading ? (
           <View style={styles.fullScreenLoader}>
               <View style={styles.skeletonTitle} />
@@ -388,14 +384,15 @@ const styles = StyleSheet.create({
     titleRow: { flexDirection: 'row', alignItems: 'flex-start' },
     titleTextContainer: { flex: 1 },
     mainTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-    metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 5, marginBottom: 12 },
+    
+    // ভিউজ এবং ডানপাশের আইকনের জন্য স্টাইল
+    metaActionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, marginBottom: 15 },
+    metaLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
     mainViews: { color: '#AAA', fontSize: 12 },
     moreText: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginLeft: 8 },
     
-    smartActionRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
-    smartBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#272727', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#333' },
-    smartBtnActive: { backgroundColor: '#00BFA5', borderColor: '#00BFA5' },
-    smartBtnText: { color: '#DDD', fontSize: 14, fontWeight: 'bold', marginLeft: 6 },
+    actionRight: { flexDirection: 'row', alignItems: 'center' },
+    iconOnlyBtn: { padding: 8, marginLeft: 15 }, // শুধুমাত্র আইকনের জন্য স্টাইল
     
     divider: { height: 1, backgroundColor: '#222', marginVertical: 10 },
     channelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
