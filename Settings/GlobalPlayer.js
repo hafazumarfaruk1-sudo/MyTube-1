@@ -42,26 +42,44 @@ export default function GlobalPlayer() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
 
-  // [NEW] Controls Show/Hide State
   const [showControls, setShowControls] = useState(true);
   const controlsTimeoutRef = useRef(null);
 
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
-  // [NEW] 2 Second Auto-Hide Controls Logic
+  // [NEW] Navigation State Listener for Auto-Minimize
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('state', (e) => {
+      if (!e.data.state) return;
+      
+      const routes = e.data.state.routes;
+      const currentRoute = routes[routes.length - 1].name;
+
+      // যদি কারেন্ট স্ক্রিন 'Player' না হয় এবং ভিডিও চালু থাকে, তাহলে ছোট করে দাও
+      if (currentRoute !== 'Player' && playerState === 'full') {
+        setPlayerState('mini');
+      } 
+      // যদি পুনরায় 'Player' স্ক্রিনে যায়, তবে বড় করে দাও
+      else if (currentRoute === 'PlayerScreen' && playerState === 'mini') {
+        setPlayerState('full');
+      }
+    });
+
+    return unsubscribe;
+  }, [navigation, playerState]);
+
   const triggerControls = () => {
     setShowControls(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     controlsTimeoutRef.current = setTimeout(() => {
         setShowControls(false);
-    }, 2000); // ২ সেকেন্ড পর হাইড হবে
+    }, 2000); 
   };
 
   useEffect(() => {
     const backAction = () => {
       if (playerState === 'full') {
         setPlayerState('mini');
-        // [NEW] যে স্ক্রিন থেকে এসেছে সেখানে ফেরত যাবে
         if (navigation.canGoBack()) {
             navigation.goBack();
         } else {
@@ -145,12 +163,12 @@ export default function GlobalPlayer() {
       setPlayerState('full'); 
       setStreamUrl(null);
       setIsAudioMode(false);
-      setBackgroundAudio(false);
+      setBackgroundAudio(true); // [NEW] অ্যাপের বাইরে গেলে যেন ব্যাকগ্রাউন্ডে অডিও চলে
       setVideoKey(Date.now().toString());
       seekPosRef.current = 0;
       setCurrentTime(0);
       setDuration(0);
-      triggerControls(); // ভিডিও প্লে হলে কন্ট্রোল দেখাবে
+      triggerControls(); 
 
       if (isLocalRef.current) {
           setStreamMode('combined');
@@ -229,7 +247,7 @@ export default function GlobalPlayer() {
         triggerControls();
     } else {
         lastTapRef.current = { time: now, side };
-        triggerControls(); // সিঙ্গেল ট্যাপে শুধু কন্ট্রোল দেখাবে
+        triggerControls(); 
     }
   };
 
@@ -278,7 +296,6 @@ export default function GlobalPlayer() {
                 />
             )}
 
-            {/* Tap Overlay (Always Active for Detection) */}
             {isFull && (
                 <View style={styles.doubleTapOverlay}>
                     <TouchableWithoutFeedback onPress={() => handleVideoTap('left')}>
@@ -290,10 +307,8 @@ export default function GlobalPlayer() {
                 </View>
             )}
 
-            {/* Controls (Show/Hide based on State) */}
             {isFull && showControls && (
                 <>
-                    {/* Back Button (Dynamic goBack logic) */}
                     <TouchableOpacity style={styles.backBtn} onPress={() => { 
                         setPlayerState('mini'); 
                         if (navigation.canGoBack()) navigation.goBack(); 
@@ -302,7 +317,6 @@ export default function GlobalPlayer() {
                         <Ionicons name="chevron-down" size={32} color="#FFF" />
                     </TouchableOpacity>
 
-                    {/* Top Right Buttons */}
                     <View style={styles.topRightControls}>
                         <TouchableOpacity onPress={handleShare} style={styles.iconBtn}>
                             <Ionicons name="share-social" size={24} color="#FFF" />
@@ -312,14 +326,12 @@ export default function GlobalPlayer() {
                         </TouchableOpacity>
                     </View>
 
-                    {/* Center Play/Pause Button */}
                     <View style={styles.centerPlayPauseContainer} pointerEvents="box-none">
                         <TouchableOpacity onPress={() => { setIsPlaying(!isPlaying); triggerControls(); }}>
                             <Ionicons name={isPlaying ? "pause-circle" : "play-circle"} size={65} color="#FFF" />
                         </TouchableOpacity>
                     </View>
 
-                    {/* Transparent Slider Area */}
                     <View style={styles.customControlsContainer}>
                         <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
                         <Slider
@@ -351,7 +363,6 @@ export default function GlobalPlayer() {
                     onPress={() => {
                         if (videoData) {
                             navigation.navigate('Player', { videoId: currentVideoIdRef.current, videoData });
-                            setPlayerState('full');
                         }
                     }}>
                     <TouchableOpacity onPress={closePlayer} style={styles.miniCloseBtn}>
@@ -381,37 +392,25 @@ export default function GlobalPlayer() {
 
 const styles = StyleSheet.create({
   fullContainer: { position: 'absolute', top: 55, left: 0, width: width, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000' },
-  
-  /* [NEW] Mini Player Green Glow Effect */
   miniContainer: { 
       position: 'absolute', bottom: 80, right: 15, width: MINI_WIDTH, height: MINI_HEIGHT, 
       backgroundColor: '#000', zIndex: 9999, borderRadius: 12, overflow: 'hidden', 
       elevation: 20, shadowColor: '#00FF00', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 10,
-      borderWidth: 1.5, borderColor: 'rgba(0, 255, 0, 0.5)' // Android Fallback Glow
+      borderWidth: 1.5, borderColor: 'rgba(0, 255, 0, 0.5)' 
   },
-  
   videoWrapper: { flex: 1, position: 'relative', justifyContent: 'center' },
   video: { width: '100%', height: '100%' },
-  
   doubleTapOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, flexDirection: 'row', zIndex: 10 },
   halfScreen: { flex: 1, height: '100%', backgroundColor: 'transparent' },
-
   backBtn: { position: 'absolute', top: 10, left: 10, zIndex: 100, padding: 5 },
-  
   topRightControls: { position: 'absolute', top: 10, right: 10, zIndex: 100, flexDirection: 'row', alignItems: 'center' },
   iconBtn: { marginLeft: 15, padding: 5, backgroundColor: 'transparent' },
-
-  /* [NEW] Center Play/Pause Button */
   centerPlayPauseContainer: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, justifyContent: 'center', alignItems: 'center', zIndex: 50 },
-
-  /* [NEW] Transparent Background Control Bar */
   customControlsContainer: { position: 'absolute', bottom: 10, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, zIndex: 50, backgroundColor: 'transparent' },
   timeText: { color: '#FFF', fontSize: 13, marginHorizontal: 5, fontWeight: 'bold', textShadowColor: 'rgba(0, 0, 0, 0.75)', textShadowOffset: {width: -1, height: 1}, textShadowRadius: 5 },
   slider: { flex: 1, height: 40, marginHorizontal: 5 },
-
   miniTouchableArea: { flex: 1, width: '100%', height: '100%', position: 'absolute', zIndex: 50 },
   miniCloseBtn: { position: 'absolute', top: 5, right: 5, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 15 },
-
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
   settingsMenu: { width: 220, backgroundColor: '#1A1A1A', borderRadius: 15, padding: 15, elevation: 10 },
   modalTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 10, textAlign: 'center', borderBottomWidth: 1, borderBottomColor: '#333', paddingBottom: 10 },
