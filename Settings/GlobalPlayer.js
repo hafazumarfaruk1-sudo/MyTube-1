@@ -53,7 +53,7 @@ export default function GlobalPlayer() {
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     controlsTimeoutRef.current = setTimeout(() => {
         setShowControls(false);
-    }, 2000); 
+    }, 4000); // ডিটেইলস পড়ার সুবিধার জন্য কন্ট্রোল হাইড হওয়ার সময় বাড়িয়ে 4 সেকেন্ড করা হলো
   };
 
   useEffect(() => {
@@ -291,12 +291,29 @@ export default function GlobalPlayer() {
                 />
             )}
 
-            {/* [NEW] লিংক দেখানোর ওভারলে */}
-            {isFull && showControls && activeSourceUrl && (
-                <View style={styles.linkOverlayBox}>
-                    <Text style={styles.linkOverlayText} numberOfLines={2}>
-                        {activeSourceUrl}
-                    </Text>
+            {/* [NEW] Detailed Stats Info Box */}
+            {isFull && showControls && streamUrl && (
+                <View style={styles.statsBox}>
+                    <Text style={styles.statsHeader}>📊 Stream Info (Stats for Nerds)</Text>
+                    <Text style={styles.statsLabel}>Mode: <Text style={styles.statsValue}>{streamMode.toUpperCase()}</Text></Text>
+                    <Text style={styles.statsLabel}>Bg Audio: <Text style={styles.statsValue}>{isAudioMode ? "ON" : "OFF"}</Text></Text>
+
+                    {streamMode === 'separate' ? (
+                        <>
+                            <Text style={styles.statsLabel}>
+                                Video Link: {isAudioMode 
+                                    ? <Text style={styles.statsDisconnected}>[DISCONNECTED - Data Saver]</Text> 
+                                    : <Text style={styles.statsLink} numberOfLines={1}>{streamUrl}</Text>}
+                            </Text>
+                            <Text style={styles.statsLabel}>
+                                Audio Link: <Text style={styles.statsLink} numberOfLines={1}>{audioOnlyUrl || "Loading..."}</Text>
+                            </Text>
+                        </>
+                    ) : (
+                        <Text style={styles.statsLabel}>
+                            Media Link: <Text style={styles.statsLink} numberOfLines={1}>{streamUrl}</Text>
+                        </Text>
+                    )}
                 </View>
             )}
 
@@ -419,25 +436,24 @@ const styles = StyleSheet.create({
   videoWrapper: { flex: 1, position: 'relative', justifyContent: 'center' },
   video: { width: '100%', height: '100%' },
 
-  // [NEW] লিংক দেখানোর স্টাইল
-  linkOverlayBox: {
+  // [NEW] Detailed Stats Box Styles
+  statsBox: {
       position: 'absolute',
       top: 50, 
       left: 10,
       right: 10,
-      backgroundColor: 'rgba(0, 0, 0, 0.7)',
-      padding: 6,
-      borderRadius: 6,
+      backgroundColor: 'rgba(20, 20, 20, 0.85)',
+      padding: 10,
+      borderRadius: 8,
       zIndex: 150,
       borderWidth: 1,
-      borderColor: '#00BFA5'
+      borderColor: '#333'
   },
-  linkOverlayText: {
-      color: '#00BFA5', // হ্যাকার গ্রিন টাইপ কালার যাতে চোখে পড়ে
-      fontSize: 10,
-      fontFamily: 'monospace',
-      textAlign: 'left'
-  },
+  statsHeader: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginBottom: 4, borderBottomWidth: 1, borderBottomColor: '#444', paddingBottom: 2 },
+  statsLabel: { color: '#AAA', fontSize: 10, marginTop: 2, fontFamily: 'monospace' },
+  statsValue: { color: '#00BFA5', fontWeight: 'bold' },
+  statsLink: { color: '#5C6BC0' }, // লিংকের কালার ব্লু/ইন্ডিগো
+  statsDisconnected: { color: '#FF5252', fontWeight: 'bold' }, // বিচ্ছিন্ন হয়ে গেলে রেড কালার
 
   audioModeOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', zIndex: 5, backgroundColor: '#111' },
   audioBlurThumb: { position: 'absolute', width: '100%', height: '100%', opacity: 0.6 },
