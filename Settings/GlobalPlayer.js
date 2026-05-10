@@ -32,11 +32,13 @@ export default function GlobalPlayer() {
   const [playerState, setPlayerState] = useState('hidden'); 
   const [videoData, setVideoData] = useState(null);
   const [streamUrl, setStreamUrl] = useState(null);
-  const [audioOnlyUrl, setAudioOnlyUrl] = useState(null); 
+  const [audioStreamUrl, setAudioStreamUrl] = useState(null); // [NEW] অডিও ইউআরএল আলাদা রাখার জন্য
   const [streamMode, setStreamMode] = useState('combined'); 
   const [isPlaying, setIsPlaying] = useState(true);
-  const [isAudioMode, setIsAudioMode] = useState(false);
+  const [isAudioMode, setIsAudioMode] = useState(false); // [NEW] অডিও মোড ট্র্যাকার
   const [videoKey, setVideoKey] = useState(Date.now().toString());
+
+  const [fallbackData, setFallbackData] = useState(null); // [NEW] কোয়ালিটি ফলব্যাক অ্যালার্টের ডাটা
 
   const [showSpeedModal, setShowSpeedModal] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
@@ -67,66 +69,137 @@ export default function GlobalPlayer() {
       return false;
     };
     const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
-    return () => { backHandler.remove(); if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current); };
+    return () => {
+        backHandler.remove();
+        if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    };
   }, [playerState, navigation]);
 
   const setBackgroundAudio = async (enable) => {
     try {
-        await Audio.setAudioModeAsync({ staysActiveInBackground: enable, playsInSilentModeIOS: true, shouldDuckAndroid: true });
+        await Audio.setAudioModeAsync({
+            staysActiveInBackground: enable,
+            playsInSilentModeIOS: true,
+            shouldDuckAndroid: true,
+        });
     } catch (e) {}
+  };
+
+  // [NEW] স্ট্রিম ডাটা অ্যাপ্লাই করার সেপারেট ফাংশন
+  const applyStreamData = async (json) => {
+    setStreamMode(json.streamType || 'combined');
+    setStreamUrl(json.url);
+    setAudioStreamUrl(json.audioUrl);
+
+    if (json.audioUrl) {
+        await syncAudioRef.current.unloadAsync().catch(()=>{});
+        const playAudioNow = isPlaying && json.streamType === 'separate';
+        await syncAudioRef.current.loadAsync(
+            { uri: json.audioUrl }, 
+            { shouldPlay: playAudioNow, positionMillis: seekPosRef.current }
+        ).catch(() => {});
+    }
+    setIsPlaying(true);
   };
 
   const fetchStreamUrl = async (vidId, targetQuality, fetchId) => {
     try {
-      const numQ = targetQuality ? targetQuality.toString().replace(/\D/g, '') : '720';
-      const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${vidId}`)}&quality=${numQ}&merge=true`;
+      const isAuto = targetQuality === 'Auto';
+      const reqQ = isAuto ? 720 : (parseInt(targetQuality.toString().replace(/\D/g, '')) || 720);
+      
+      const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${vidId}`)}&quality=${reqQ}&action=play`;
       const res = await fetch(apiUrl);
       const json = await res.json();
 
       if (fetchId !== fetchIdRef.current) return;
 
       if (json.success && json.url) {
-          // সার্ভার থেকে চেক করা হচ্ছে এটি combined (480p/720p) নাকি separate
-          setStreamMode(json.streamType || 'combined');
-          setStreamUrl(json.url);
-          setAudioOnlyUrl(json.audioUrl || null); 
+          const resQ = parseInt(json.quality) || 720;
 
-          if (json.streamType === 'separate' && json.audioUrl) {
-              await syncAudioRef.current.unloadAsync().catch(()=>{});
-              await syncAudioRef.current.loadAsync({ uri: json.audioUrl }, { shouldPlay: isPlaying && !isAudioMode, positionMillis: seekPosRef.current }).catch(() => {});
+          // [NEW] রুল ১: যদি রিকোয়েস্ট করা কোয়ালিটি না পাওয়া যায়, তবে অ্যালার্ট দেখাবে
+          if (!isAuto && reqQ > resQ) {
+              setFallbackData({
+                  reqQ: reqQ,
+                  resQ: resQ,
+                  data: json,
+                  message: `Requested ${reqQ}p is not available for this video.\nPlay highest available quality (${resQ}p) instead?`
+              });
+              return; 
           }
-          setIsPlaying(true);
+
+          // যদি কোয়ালিটি মিলে যায়, তবে সরাসরি প্লে হবে
+          await applyStreamData(json);
       }
     } catch(e) { console.log("Connection Error"); }
   };
 
+  // [UPDATED] ভিডিও প্লেব্যাকের সাথে অডিও সিঙ্ক
   const handlePlaybackStatusUpdate = async (status) => {
-    if (status.isLoaded) {
+    if (!isAudioMode && status.isLoaded) {
         setCurrentTime(status.positionMillis);
         if (status.durationMillis) setDuration(status.durationMillis);
 
-        if (streamMode === 'separate') {
-            if (!isAudioMode) {
-                try {
-                    const audioStatus = await syncAudioRef.current.getStatusAsync();
-                    if (audioStatus.isLoaded) {
-                        if (status.isPlaying && !audioStatus.isPlaying) await syncAudioRef.current.playAsync();
-                        if (!status.isPlaying && audioStatus.isPlaying) await syncAudioRef.current.pauseAsync();
-                        if (Math.abs(status.positionMillis - audioStatus.positionMillis) > 600) {
-                            await syncAudioRef.current.setPositionAsync(status.positionMillis);
-                        }
+        if (streamMode === 'separate' && audioStreamUrl) {
+            try {
+                const audioStatus = await syncAudioRef.current.getStatusAsync();
+                if (audioStatus.isLoaded) {
+                    if (status.isPlaying && !audioStatus.isPlaying) await syncAudioRef.current.playAsync();
+                    if (!status.isPlaying && audioStatus.isPlaying) await syncAudioRef.current.pauseAsync();
+                    if (Math.abs(status.positionMillis - audioStatus.positionMillis) > 800) {
+                        await syncAudioRef.current.setPositionAsync(status.positionMillis);
                     }
-                } catch(e) {}
-            } else {
-                try {
-                    const audioStatus = await syncAudioRef.current.getStatusAsync();
-                    if (audioStatus.isLoaded && audioStatus.isPlaying) {
-                        await syncAudioRef.current.pauseAsync();
-                    }
-                } catch(e) {}
-            }
+                }
+            } catch(e) {}
         }
     }
+  };
+
+  // [NEW] অডিও মোডের সময় টাইম আপডেট করার লজিক
+  useEffect(() => {
+      syncAudioRef.current.setOnPlaybackStatusUpdate((status) => {
+          if (isAudioMode && status.isLoaded) {
+              setCurrentTime(status.positionMillis);
+              if (status.durationMillis) setDuration(status.durationMillis);
+          }
+      });
+  }, [isAudioMode]);
+
+  // [NEW] অডিও মোড টগল (ভিডিও রিমুভ করে অডিও প্লে করা)
+  const toggleAudioMode = async () => {
+      const newMode = !isAudioMode;
+      setIsAudioMode(newMode);
+
+      if (newMode) {
+          // অডিও মোড অন: ভিডিও পজ করে শুধু অডিও প্লে করা হবে
+          setBackgroundAudio(true);
+          if (videoRef.current) {
+              const vStatus = await videoRef.current.getStatusAsync();
+              if (vStatus.isLoaded) await syncAudioRef.current.setPositionAsync(vStatus.positionMillis);
+              await videoRef.current.pauseAsync().catch(()=>{});
+          }
+          if (isPlaying && audioStreamUrl) await syncAudioRef.current.playAsync().catch(()=>{});
+      } else {
+          // অডিও মোড অফ: অডিও পজ করে ভিডিও প্লে করা হবে
+          setBackgroundAudio(false);
+          const aStatus = await syncAudioRef.current.getStatusAsync();
+          if (aStatus.isLoaded) {
+              seekPosRef.current = aStatus.positionMillis;
+          }
+          if (streamMode === 'combined') {
+              await syncAudioRef.current.pauseAsync().catch(()=>{});
+          }
+      }
+      triggerControls();
+  };
+
+  const handlePlayPause = async () => {
+      const nextPlay = !isPlaying;
+      setIsPlaying(nextPlay);
+      if (isAudioMode && audioStreamUrl) {
+          if (nextPlay) await syncAudioRef.current.playAsync();
+          else await syncAudioRef.current.pauseAsync();
+      }
+      triggerControls();
   };
 
   useEffect(() => {
@@ -142,7 +215,8 @@ export default function GlobalPlayer() {
       setVideoData(data.videoData);
       setPlayerState('full'); 
       setStreamUrl(null);
-      setAudioOnlyUrl(null);
+      setAudioStreamUrl(null);
+      setFallbackData(null); // [NEW] নতুন ভিডিওর সময় ফলব্যাক ক্লিয়ার
       setIsAudioMode(false);
       setBackgroundAudio(false);
       setVideoKey(Date.now().toString());
@@ -169,32 +243,14 @@ export default function GlobalPlayer() {
                 await videoRef.current.pauseAsync();
             }
             setStreamUrl(null);
-            setAudioOnlyUrl(null);
+            setFallbackData(null);
             setVideoKey(Date.now().toString());
             fetchStreamUrl(currentVideoIdRef.current, newQuality, fetchIdRef.current);
         }
     });
 
-    const audioModeSub = DeviceEventEmitter.addListener('toggleAudioMode', async (isAudio) => {
-        if (videoRef.current) {
-            const status = await videoRef.current.getStatusAsync();
-            if (status && status.isLoaded) {
-                seekPosRef.current = status.positionMillis;
-            }
-        }
-        
-        setIsAudioMode(isAudio);
-        await setBackgroundAudio(isAudio); 
-
-        // [মূল লজিক] যদি Separate (High Quality) হয়, তবেই ভিডিও রিস্টার্ট করে শুধু অডিও লিংক লোড করবে
-        // যদি Combined (480p/720p) হয়, তবে কোনো রিলোড হবে না, শুধু ভিডিওর উপর ওভারলে চলে আসবে
-        if (streamMode === 'separate') {
-            setVideoKey(Date.now().toString()); 
-        }
-    });
-
-    return () => { playSub.remove(); qualitySub.remove(); audioModeSub.remove(); };
-  }, [streamMode]); 
+    return () => { playSub.remove(); qualitySub.remove(); };
+  }, [streamMode]);
 
   const changeSpeed = async (speed) => {
     setPlaybackSpeed(speed);
@@ -220,16 +276,19 @@ export default function GlobalPlayer() {
     if (syncAudioRef.current) await syncAudioRef.current.unloadAsync().catch(()=>{});
     setPlayerState('hidden'); 
     setStreamUrl(null);
-    setAudioOnlyUrl(null);
     setIsPlaying(false);
+    setFallbackData(null);
   };
 
   const skipVideo = async (amount) => {
-    if (videoRef.current && duration > 0) {
+    if (duration > 0) {
         let newPosition = currentTime + amount;
         if (newPosition < 0) newPosition = 0;
         if (newPosition > duration) newPosition = duration;
-        await videoRef.current.setPositionAsync(newPosition);
+        
+        if (isAudioMode) await syncAudioRef.current.setPositionAsync(newPosition);
+        else if (videoRef.current) await videoRef.current.setPositionAsync(newPosition);
+        
         setCurrentTime(newPosition);
     }
   };
@@ -271,53 +330,56 @@ export default function GlobalPlayer() {
   if (playerState === 'hidden') return null;
   const isFull = playerState === 'full';
 
-  // [ডেটা সেভিং লজিক]: Separate মোডে ভিডিও রিমুভ করে শুধু অডিও লিংক ব্যবহার করা হচ্ছে
-  let activeSourceUrl = streamUrl;
-  if (isAudioMode && streamMode === 'separate' && audioOnlyUrl) {
-      activeSourceUrl = audioOnlyUrl;
-  }
-
   return (
      <Animated.View style={[isFull ? styles.fullContainer : styles.miniContainer, !isFull && { transform: pan.getTranslateTransform() }]} {...(isFull ? {} : panResponder.panHandlers)}>
         <View style={styles.videoWrapper}>
-            {activeSourceUrl && (
+            
+            {/* [NEW] অডিও মোড স্ক্রিন (ভিডিও রিমুভ করে দিলে এটি দেখাবে) */}
+            {isAudioMode && isFull && !fallbackData && (
+                <View style={styles.audioModeOverlay}>
+                    <Ionicons name="headset" size={80} color="#FF0000" />
+                    <Text style={styles.audioModeText}>Audio Mode Active</Text>
+                </View>
+            )}
+
+            {/* ভিডিও কম্পোনেন্ট (অডিও মোডে থাকলে source null হয়ে যাবে) */}
+            {streamUrl && !fallbackData && (
                 <Video 
                     key={videoKey}
                     ref={videoRef} 
-                    source={{ uri: activeSourceUrl }} 
+                    source={isAudioMode ? null : { uri: streamUrl }} 
                     style={styles.video} 
                     shouldPlay={isPlaying} 
-                    positionMillis={seekPosRef.current} 
-                    isMuted={streamMode === 'separate' && !isAudioMode}
+                    positionMillis={seekPosRef.current}
+                    isMuted={streamMode === 'separate'}
                     onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
                     useNativeControls={false} 
                     resizeMode="contain" 
                 />
             )}
 
-            {isFull && showControls && activeSourceUrl && (
-                <View style={styles.linkOverlayBox}>
-                    <Text style={styles.linkOverlayText} numberOfLines={2}>
-                        {activeSourceUrl}
-                    </Text>
-                </View>
-            )}
-
-            {/* কোনো লোডিং ছাড়াই Combined ভিডিও হাইড করার জন্য ওভারলে */}
-            {isAudioMode && (
-                <View style={styles.audioModeOverlay}>
-                    {videoData?.thumbnail && (
-                        <Image source={{ uri: videoData.thumbnail }} style={styles.audioBlurThumb} blurRadius={15} />
-                    )}
-                    <View style={styles.audioOverlayDarkener} />
-                    <View style={styles.audioIconCircle}>
-                       <Ionicons name="musical-notes" size={45} color="#00BFA5" />
+            {/* [NEW] কোয়ালিটি ফলব্যাক অ্যালার্ট */}
+            {fallbackData && isFull && (
+                <View style={styles.fallbackOverlay}>
+                    <Ionicons name="alert-circle" size={60} color="#FFD700" />
+                    <Text style={styles.fallbackTitle}>Quality Not Found</Text>
+                    <Text style={styles.fallbackText}>{fallbackData.message}</Text>
+                    <View style={styles.fallbackBtnRow}>
+                        <TouchableOpacity style={styles.fallbackBtn} onPress={() => {
+                            applyStreamData(fallbackData.data);
+                            setFallbackData(null);
+                        }}>
+                            <Text style={styles.fallbackBtnText}>OK, Play {fallbackData.resQ}p</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.fallbackBtn, {backgroundColor: '#333'}]} onPress={closePlayer}>
+                            <Text style={styles.fallbackBtnText}>Cancel</Text>
+                        </TouchableOpacity>
                     </View>
-                    <Text style={styles.audioModeText}>Background Audio Playing</Text>
                 </View>
             )}
 
-            {isFull && (
+            {/* ডাবল ট্যাপ ডিটেকশন */}
+            {isFull && !fallbackData && (
                 <View style={styles.doubleTapOverlay}>
                     <TouchableWithoutFeedback onPress={() => handleVideoTap('left')}>
                         <View style={styles.halfScreen} />
@@ -328,7 +390,8 @@ export default function GlobalPlayer() {
                 </View>
             )}
 
-            {isFull && showControls && (
+            {/* কন্ট্রোল বার */}
+            {isFull && showControls && !fallbackData && (
                 <>
                     <TouchableOpacity style={styles.backBtn} onPress={() => { 
                         setPlayerState('mini'); 
@@ -339,6 +402,11 @@ export default function GlobalPlayer() {
                     </TouchableOpacity>
 
                     <View style={styles.topRightControls}>
+                        {/* [NEW] অডিও মোড অন/অফ বাটন */}
+                        <TouchableOpacity onPress={toggleAudioMode} style={[styles.iconBtn, isAudioMode && {backgroundColor: 'rgba(255,0,0,0.3)', borderRadius: 20}]}>
+                            <Ionicons name={isAudioMode ? "headset" : "headset-outline"} size={24} color={isAudioMode ? "#FF0000" : "#FFF"} />
+                        </TouchableOpacity>
+
                         <TouchableOpacity onPress={handleShare} style={styles.iconBtn}>
                             <Ionicons name="share-social" size={24} color="#FFF" />
                         </TouchableOpacity>
@@ -348,7 +416,7 @@ export default function GlobalPlayer() {
                     </View>
 
                     <View style={styles.centerPlayPauseContainer} pointerEvents="box-none">
-                        <TouchableOpacity onPress={() => { setIsPlaying(!isPlaying); triggerControls(); }}>
+                        <TouchableOpacity onPress={handlePlayPause}>
                             <Ionicons name={isPlaying ? "pause-circle" : "play-circle"} size={65} color="#FFF" />
                         </TouchableOpacity>
                     </View>
@@ -362,10 +430,9 @@ export default function GlobalPlayer() {
                             value={currentTime}
                             onSlidingStart={() => { if(controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current); }}
                             onSlidingComplete={async (value) => {
-                                if (videoRef.current) {
-                                    await videoRef.current.setPositionAsync(value);
-                                    setCurrentTime(value);
-                                }
+                                if (isAudioMode) await syncAudioRef.current.setPositionAsync(value);
+                                else if (videoRef.current) await videoRef.current.setPositionAsync(value);
+                                setCurrentTime(value);
                                 triggerControls();
                             }}
                             minimumTrackTintColor="#FF0000"
@@ -414,46 +481,37 @@ export default function GlobalPlayer() {
 
 const styles = StyleSheet.create({
   fullContainer: { position: 'absolute', top: 55, left: 0, width: width, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000' },
+
   miniContainer: { 
       position: 'absolute', bottom: 80, right: 15, width: MINI_WIDTH, height: MINI_HEIGHT, 
       backgroundColor: '#000', zIndex: 9999, borderRadius: 12, overflow: 'hidden', 
       elevation: 20, shadowColor: '#00FF00', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 10,
-      borderWidth: 1.5, borderColor: 'rgba(0, 255, 0, 0.5)' 
+      borderWidth: 1.5, borderColor: 'rgba(0, 255, 0, 0.5)'
   },
+
   videoWrapper: { flex: 1, position: 'relative', justifyContent: 'center' },
   video: { width: '100%', height: '100%' },
 
-  linkOverlayBox: {
-      position: 'absolute',
-      top: 50, 
-      left: 10,
-      right: 10,
-      backgroundColor: 'rgba(0, 0, 0, 0.7)',
-      padding: 6,
-      borderRadius: 6,
-      zIndex: 150,
-      borderWidth: 1,
-      borderColor: '#00BFA5'
-  },
-  linkOverlayText: {
-      color: '#00BFA5',
-      fontSize: 10,
-      fontFamily: 'monospace',
-      textAlign: 'left'
-  },
+  // [NEW] অডিও মোড স্ক্রিন স্টাইল
+  audioModeOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: '#111', justifyContent: 'center', alignItems: 'center', zIndex: 1 },
+  audioModeText: { color: '#FFF', fontSize: 18, marginTop: 10, fontWeight: 'bold' },
 
-  audioModeOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', zIndex: 5, backgroundColor: '#111' },
-  audioBlurThumb: { position: 'absolute', width: '100%', height: '100%', opacity: 0.6 },
-  audioOverlayDarkener: { position: 'absolute', width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)' },
-  audioIconCircle: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(0, 0, 0, 0.6)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#00BFA5', marginBottom: 10 },
-  audioModeText: { color: '#FFF', fontSize: 14, fontWeight: 'bold', textShadowColor: '#000', textShadowOffset: {width: 1, height: 1}, textShadowRadius: 3 },
+  // [NEW] ফলব্যাক অ্যালার্ট স্টাইল
+  fallbackOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', zIndex: 200 },
+  fallbackTitle: { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginTop: 10 },
+  fallbackText: { color: '#CCC', fontSize: 15, marginVertical: 15, textAlign: 'center', paddingHorizontal: 20 },
+  fallbackBtnRow: { flexDirection: 'row', marginTop: 10 },
+  fallbackBtn: { backgroundColor: '#FF0000', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8, marginHorizontal: 10 },
+  fallbackBtnText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
 
   doubleTapOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, flexDirection: 'row', zIndex: 10 },
   halfScreen: { flex: 1, height: '100%', backgroundColor: 'transparent' },
 
   backBtn: { position: 'absolute', top: 10, left: 10, zIndex: 100, padding: 5 },
+
   topRightControls: { position: 'absolute', top: 10, right: 10, zIndex: 100, flexDirection: 'row', alignItems: 'center' },
   iconBtn: { marginLeft: 15, padding: 5, backgroundColor: 'transparent' },
+
   centerPlayPauseContainer: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, justifyContent: 'center', alignItems: 'center', zIndex: 50 },
 
   customControlsContainer: { position: 'absolute', bottom: 10, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, zIndex: 50, backgroundColor: 'transparent' },
