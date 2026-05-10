@@ -1,153 +1,14 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, StyleSheet, Text, ActivityIndicator, TouchableOpacity, FlatList, Image, Dimensions, StatusBar, SafeAreaView, Modal, Alert, Platform, PanResponder } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, StyleSheet, Text, ActivityIndicator, TouchableOpacity, FlatList, Image, Dimensions, StatusBar, SafeAreaView, ScrollView, Modal, Alert, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DeviceEventEmitter } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import * as NavigationBar from 'expo-navigation-bar';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const PLAYER_HEIGHT = (SCREEN_WIDTH * 9) / 16; 
+const { width, height } = Dimensions.get('window');
+const PLAYER_HEIGHT = (width * 9) / 16; 
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
-
-// =========================================================
-// 3D Download Modal Component (Optimized & Perfectly Centered)
-// =========================================================
-const ThreeDDownloadModal = ({ visible, onClose, downloadLinks, downloadType, onToggleType, isLoading, onExecute }) => {
-    const [rotation, setRotation] = useState({ x: 0, y: 0 });
-    const rotationRef = useRef({ x: 0, y: 0 });
-
-    const panResponder = useRef(
-        PanResponder.create({
-            onStartShouldSetPanResponder: () => true,
-            onMoveShouldSetPanResponder: (evt, gestureState) => {
-                return Math.abs(gestureState.dx) > 2 || Math.abs(gestureState.dy) > 2;
-            },
-            onPanResponderMove: (evt, gestureState) => {
-                setRotation({
-                    x: rotationRef.current.x - gestureState.dy * 0.6,
-                    y: rotationRef.current.y + gestureState.dx * 0.6
-                });
-            },
-            onPanResponderRelease: (evt, gestureState) => {
-                rotationRef.current.x -= gestureState.dy * 0.6;
-                rotationRef.current.y += gestureState.dx * 0.6;
-            }
-        })
-    ).current;
-
-    useEffect(() => {
-        if (visible) {
-            setRotation({ x: 0, y: 0 });
-            rotationRef.current = { x: 0, y: 0 };
-        }
-    }, [visible]);
-
-    let backgroundCards = [];
-    let foregroundCards = [];
-
-    if (!isLoading && downloadLinks.length > 0) {
-        const displayLinks = downloadLinks.slice(0, 12);
-        const N = displayLinks.length;
-        const radius = 160; 
-
-        const mappedCards = displayLinks.map((item, index) => {
-            const angle = (index / N) * Math.PI * 2;
-            const yOffset = N > 6 ? (index % 2 === 0 ? 45 : -45) : 0; 
-
-            const baseZ = Math.sin(angle) * radius;
-            const baseX = Math.cos(angle) * radius;
-            const baseY = yOffset;
-
-            const p = rotation.x * Math.PI / 180;
-            const yw = rotation.y * Math.PI / 180;
-
-            const y1 = baseY * Math.cos(p) - baseZ * Math.sin(p);
-            const z1 = baseY * Math.sin(p) + baseZ * Math.cos(p);
-            const x2 = baseX * Math.cos(yw) + z1 * Math.sin(yw);
-            const z2 = -baseX * Math.sin(yw) + z1 * Math.cos(yw);
-
-            const perspective = 800;
-            const scale = perspective / (perspective - z2);
-            const opacity = Math.max(0.15, Math.min(1, scale - 0.2)); 
-
-            return { item, index, x: x2 * scale, y: y1 * scale, z: z2, scale, opacity };
-        });
-
-        mappedCards.sort((a, b) => a.z - b.z);
-        backgroundCards = mappedCards.filter(c => c.z < 0);
-        foregroundCards = mappedCards.filter(c => c.z >= 0);
-    }
-
-    const renderCard = (c) => (
-        <TouchableOpacity 
-            key={c.index} 
-            style={[
-                styles.floatingGlassCard, 
-                { 
-                    // ম্যাথমেটিকাল সেন্টারিং (স্ক্রিনের ঠিক মাঝামাঝি)
-                    left: (SCREEN_WIDTH / 2) - 55, // 55 হলো কার্ডের অর্ধেক সাইজ
-                    top: (SCREEN_HEIGHT / 2) - 32.5, // 32.5 হলো কার্ডের অর্ধেক উচ্চতা
-                    transform: [{ translateX: c.x }, { translateY: c.y }, { scale: c.scale }],
-                    opacity: c.opacity,
-                    zIndex: Math.round(c.z)
-                }
-            ]} 
-            activeOpacity={0.8}
-            onPress={() => onExecute(c.item)}
-        >
-            <Text style={styles.floatingType}>{downloadType === 'video' ? 'MP4' : 'MP3'}</Text>
-            <Text style={styles.floatingQuality}>{c.item.quality}</Text>
-            <Text style={styles.floatingSize}>{c.item.size || (downloadType === 'video' ? '≈ HD' : '≈ 128kbps')}</Text>
-        </TouchableOpacity>
-    );
-
-    return (
-        <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-            {/* ব্যাকগ্রাউন্ড কালো পর্দা সরানো হয়েছে */}
-            <View style={styles.threeDOverlay} {...panResponder.panHandlers}>
-                
-                <TouchableOpacity style={styles.closeTopRightBtn} onPress={onClose}>
-                    <Ionicons name="close" size={28} color="#FFF" />
-                </TouchableOpacity>
-
-                {backgroundCards.map(renderCard)}
-
-                {/* গাণিতিক সেন্টারিং কিউব */}
-                <TouchableOpacity 
-                    style={[
-                        styles.centerGlassCube,
-                        {
-                            left: (SCREEN_WIDTH / 2) - 60, // 60 হলো কিউবের অর্ধেক সাইজ
-                            top: (SCREEN_HEIGHT / 2) - 60,
-                            transform: [
-                                { perspective: 800 },
-                                { rotateX: `${-rotation.x}deg` },
-                                { rotateY: `${rotation.y}deg` }
-                            ],
-                            zIndex: 0
-                        }
-                    ]} 
-                    activeOpacity={0.9} 
-                    onPress={onToggleType}
-                >
-                    {isLoading ? (
-                        <ActivityIndicator size="large" color="#FFF" />
-                    ) : (
-                        <>
-                            <Ionicons name="videocam" size={32} color={downloadType === 'video' ? '#00BFA5' : 'rgba(255,255,255,0.4)'} />
-                            <Ionicons name="swap-vertical" size={24} color="#888" style={{ marginVertical: 8 }} />
-                            <Ionicons name="musical-notes" size={32} color={downloadType === 'audio' ? '#00BFA5' : 'rgba(255,255,255,0.4)'} />
-                        </>
-                    )}
-                </TouchableOpacity>
-
-                {foregroundCards.map(renderCard)}
-            </View>
-        </Modal>
-    );
-};
-// =========================================================
 
 export default function PlayerScreen({ route, navigation }) {
   const { videoId, videoData = {} } = route?.params || {};
@@ -159,7 +20,8 @@ export default function PlayerScreen({ route, navigation }) {
 
   const [isInitialLoading, setIsInitialLoading] = useState(true);
 
-  const [show3DModal, setShow3DModal] = useState(false);
+  // 2D Download Modal States
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [downloadStep, setDownloadStep] = useState('fetching'); 
   const [downloadLinks, setDownloadLinks] = useState([]);
   const [downloadType, setDownloadType] = useState('video'); 
@@ -225,7 +87,7 @@ export default function PlayerScreen({ route, navigation }) {
 
   const handleDownloadExecute = async (item) => {
     try {
-      setShow3DModal(false);
+      setShowDownloadModal(false);
       setIsDownloading(true);
       setTimeout(() => setIsDownloading(false), 2000);
 
@@ -237,23 +99,27 @@ export default function PlayerScreen({ route, navigation }) {
 
       const response = await fetch(dlApiUrl);
       const resJson = await response.json();
+
+      if (resJson.success) {
+          // সাইলেন্ট ডাউনলোড
+      }
     } catch (error) {
       Alert.alert("সার্ভার এরর", "সার্ভারের সাথে কানেক্ট করা যায়নি।");
     }
   };
 
-  const open3DDownloadWindow = () => {
-      setShow3DModal(true);
+  const openDownloadWindow = () => {
+      setShowDownloadModal(true);
       setDownloadType('video'); 
       setDownloadStep('fetching');
       fetchDownloadLinks('video');
   };
 
-  const toggle3DDownloadType = () => {
-      const newType = downloadType === 'video' ? 'audio' : 'video';
-      setDownloadType(newType);
+  const changeDownloadType = (type) => {
+      if(downloadType === type) return;
+      setDownloadType(type);
       setDownloadStep('fetching');
-      fetchDownloadLinks(newType);
+      fetchDownloadLinks(type);
   };
 
   const fetchDownloadLinks = async (type) => {
@@ -267,10 +133,10 @@ export default function PlayerScreen({ route, navigation }) {
         setDownloadStep('list');
       } else {
         Alert.alert("ত্রুটি", "কোনো লিংক পাওয়া যায়নি।");
-        setShow3DModal(false);
+        setShowDownloadModal(false);
       }
     } catch (error) {
-      setShow3DModal(false);
+      setShowDownloadModal(false);
     }
   };
 
@@ -328,6 +194,17 @@ export default function PlayerScreen({ route, navigation }) {
     } catch (e) {} finally { setIsLoadingMore(false); }
   };
 
+  // [NEW]: লিংকগুলোকে ছোট থেকে বড় আকারে সাজানোর লজিক
+  const getSortedLinks = () => {
+      if(!downloadLinks) return [];
+      return [...downloadLinks].sort((a, b) => {
+          // কোয়ালিটি থেকে শুধুমাত্র সংখ্যা বের করে তুলনা করা হচ্ছে (যেমন 144p থেকে 144)
+          const valA = parseInt(a.quality.replace(/[^0-9]/g, '')) || 0;
+          const valB = parseInt(b.quality.replace(/[^0-9]/g, '')) || 0;
+          return valA - valB; // Ascending order
+      });
+  };
+
   const renderHeader = () => (
     <View style={styles.detailsContainer}>
       <View style={styles.titleRow}>
@@ -344,7 +221,7 @@ export default function PlayerScreen({ route, navigation }) {
          
          <View style={styles.actionRight}>
             {!videoData.localUri && (
-              <TouchableOpacity style={styles.iconOnlyBtn} onPress={open3DDownloadWindow} activeOpacity={0.6}>
+              <TouchableOpacity style={styles.iconOnlyBtn} onPress={openDownloadWindow} activeOpacity={0.6}>
                  <Ionicons name="download-outline" size={24} color="#FFF" />
               </TouchableOpacity>
             )}
@@ -435,16 +312,74 @@ export default function PlayerScreen({ route, navigation }) {
           />
       )}
 
-      {/* অপ্টিমাইজড এবং সেন্টার্ড 3D মডাল */}
-      <ThreeDDownloadModal 
-          visible={show3DModal} 
-          onClose={() => setShow3DModal(false)}
-          downloadLinks={downloadLinks}
-          downloadType={downloadType}
-          isLoading={downloadStep === 'fetching'}
-          onToggleType={toggle3DDownloadType}
-          onExecute={handleDownloadExecute}
-      />
+      {/* 2D Premium Download Bottom Sheet */}
+      <Modal visible={showDownloadModal} transparent animationType="slide" onRequestClose={() => setShowDownloadModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            
+            <View style={styles.modalDragIndicator} />
+            
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>ডাউনলোড অপশন</Text>
+                <Text style={styles.modalSubtitle}>ছোট থেকে বড় সাইজ অনুযায়ী সাজানো</Text>
+              </View>
+              <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setShowDownloadModal(false)}>
+                <Ionicons name="close" size={24} color="#FFF" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Video/Audio Tabs */}
+            <View style={styles.tabContainer}>
+                <TouchableOpacity 
+                    style={[styles.tabButton, downloadType === 'video' && styles.activeTabButton]} 
+                    onPress={() => changeDownloadType('video')}
+                    activeOpacity={0.8}
+                >
+                    <Ionicons name="videocam" size={20} color={downloadType === 'video' ? '#FFF' : '#888'} />
+                    <Text style={[styles.tabText, downloadType === 'video' && styles.activeTabText]}>Video</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                    style={[styles.tabButton, downloadType === 'audio' && styles.activeTabButton]} 
+                    onPress={() => changeDownloadType('audio')}
+                    activeOpacity={0.8}
+                >
+                    <Ionicons name="musical-notes" size={20} color={downloadType === 'audio' ? '#FFF' : '#888'} />
+                    <Text style={[styles.tabText, downloadType === 'audio' && styles.activeTabText]}>Audio</Text>
+                </TouchableOpacity>
+            </View>
+            
+            {/* List Content */}
+            {downloadStep === 'fetching' ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#00BFA5" />
+                <Text style={styles.loadingText}>লিঙ্ক তৈরি হচ্ছে...</Text>
+              </View>
+            ) : (
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.qualityListContainer}>
+                {getSortedLinks().map((item, index) => (
+                  <TouchableOpacity key={index} style={styles.qualityCard} activeOpacity={0.7} onPress={() => handleDownloadExecute(item)}>
+                    <View style={styles.qualityInfoLeft}>
+                      <View style={styles.qualityIconBg}>
+                          <Ionicons name={downloadType === 'audio' ? "headset" : "videocam"} size={22} color="#00BFA5" />
+                      </View>
+                      <View style={{ marginLeft: 15 }}>
+                        <Text style={styles.qualityText}>{item.quality}</Text>
+                        <Text style={styles.qualitySubText}>{item.size || (downloadType === 'video' ? 'MP4 Format' : 'MP3 Format')}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.downloadIconBtn}>
+                        <Ionicons name="download-outline" size={20} color="#00BFA5" />
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+
+          </View>
+        </View>
+      </Modal>
 
     </SafeAreaView>
   );
@@ -502,47 +437,43 @@ const styles = StyleSheet.create({
     recViewsInfo: { color: '#888', fontSize: 11, marginTop: 2 },
     
     // ==========================================
-    // 3D UI Styles (Fixed)
+    // 2D Premium Modal Styles
     // ==========================================
-    threeDOverlay: { 
-        flex: 1, 
-        backgroundColor: 'transparent' // কালো পর্দা সম্পূর্ণ মুছে ফেলা হয়েছে
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+    modalContent: { 
+        backgroundColor: '#1E1E1E', 
+        borderTopLeftRadius: 24, 
+        borderTopRightRadius: 24, 
+        paddingHorizontal: 20, 
+        paddingTop: 12, 
+        paddingBottom: Platform.OS === 'ios' ? 40 : 25, 
+        maxHeight: height * 0.75,
+        minHeight: 400
     },
+    modalDragIndicator: { width: 40, height: 5, backgroundColor: '#444', borderRadius: 3, alignSelf: 'center', marginBottom: 20 },
+    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+    modalTitle: { color: '#FFF', fontSize: 20, fontWeight: 'bold' },
+    modalSubtitle: { color: '#888', fontSize: 12, marginTop: 4 },
+    modalCloseBtn: { padding: 8, backgroundColor: '#2A2A2A', borderRadius: 20 },
     
-    centerGlassCube: {
-        position: 'absolute',
-        width: 120, height: 120,
-        backgroundColor: 'rgba(25, 25, 25, 0.9)',
-        borderWidth: 1.5, borderColor: 'rgba(255, 255, 255, 0.15)',
-        borderRadius: 25,
-        justifyContent: 'center', alignItems: 'center',
-        shadowColor: '#00BFA5', shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.3, shadowRadius: 30,
-        elevation: 15
-    },
+    tabContainer: { flexDirection: 'row', backgroundColor: '#111', borderRadius: 12, padding: 4, marginBottom: 20 },
+    tabButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 8 },
+    activeTabButton: { backgroundColor: '#2A2A2A' },
+    tabText: { color: '#888', fontSize: 15, fontWeight: 'bold', marginLeft: 8 },
+    activeTabText: { color: '#FFF' },
 
-    floatingGlassCard: {
-        position: 'absolute',
-        width: 110, height: 65,
-        backgroundColor: 'rgba(30, 30, 30, 0.95)',
-        borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.25)',
-        borderRadius: 14,
-        alignItems: 'center', justifyContent: 'center',
-        shadowColor: '#000', shadowOffset: { width: 0, height: 10 },
-        shadowOpacity: 0.8, shadowRadius: 15,
+    loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+    loadingText: { color: '#AAA', marginTop: 15, fontSize: 15 },
+    
+    qualityListContainer: { paddingBottom: 10 },
+    qualityCard: { 
+        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', 
+        backgroundColor: '#282828', padding: 12, borderRadius: 16, marginBottom: 12, 
+        borderWidth: 1, borderColor: '#383838' 
     },
-    floatingType: { color: '#FFF', fontSize: 13, fontWeight: 'bold' },
-    floatingQuality: { color: '#00BFA5', fontSize: 11, marginTop: 2, fontWeight: '700' },
-    floatingSize: { color: '#AAA', fontSize: 10, marginTop: 2 },
-
-    closeTopRightBtn: {
-        position: 'absolute', 
-        top: Platform.OS === 'ios' ? 55 : 35, 
-        right: 25,
-        backgroundColor: 'rgba(25, 25, 25, 0.8)',
-        width: 44, height: 44, borderRadius: 22,
-        justifyContent: 'center', alignItems: 'center',
-        borderWidth: 1.5, borderColor: 'rgba(255, 255, 255, 0.5)',
-        zIndex: 9999
-    }
+    qualityInfoLeft: { flexDirection: 'row', alignItems: 'center' },
+    qualityIconBg: { backgroundColor: 'rgba(0, 191, 165, 0.1)', padding: 10, borderRadius: 12 },
+    qualityText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+    qualitySubText: { color: '#888', fontSize: 12, marginTop: 3 },
+    downloadIconBtn: { padding: 10 }
 });
