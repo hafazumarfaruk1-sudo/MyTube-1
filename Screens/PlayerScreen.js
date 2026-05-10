@@ -194,14 +194,12 @@ export default function PlayerScreen({ route, navigation }) {
     } catch (e) {} finally { setIsLoadingMore(false); }
   };
 
-  // [NEW]: লিংকগুলোকে ছোট থেকে বড় আকারে সাজানোর লজিক
   const getSortedLinks = () => {
       if(!downloadLinks) return [];
       return [...downloadLinks].sort((a, b) => {
-          // কোয়ালিটি থেকে শুধুমাত্র সংখ্যা বের করে তুলনা করা হচ্ছে (যেমন 144p থেকে 144)
           const valA = parseInt(a.quality.replace(/[^0-9]/g, '')) || 0;
           const valB = parseInt(b.quality.replace(/[^0-9]/g, '')) || 0;
-          return valA - valB; // Ascending order
+          return valA - valB; // ছোট থেকে বড় 
       });
   };
 
@@ -312,7 +310,7 @@ export default function PlayerScreen({ route, navigation }) {
           />
       )}
 
-      {/* 2D Premium Download Bottom Sheet */}
+      {/* 2D Premium Grid Download Modal */}
       <Modal visible={showDownloadModal} transparent animationType="slide" onRequestClose={() => setShowDownloadModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -329,7 +327,6 @@ export default function PlayerScreen({ route, navigation }) {
               </TouchableOpacity>
             </View>
 
-            {/* Video/Audio Tabs */}
             <View style={styles.tabContainer}>
                 <TouchableOpacity 
                     style={[styles.tabButton, downloadType === 'video' && styles.activeTabButton]} 
@@ -350,28 +347,21 @@ export default function PlayerScreen({ route, navigation }) {
                 </TouchableOpacity>
             </View>
             
-            {/* List Content */}
+            {/* Grid Content */}
             {downloadStep === 'fetching' ? (
               <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color="#00BFA5" />
                 <Text style={styles.loadingText}>লিঙ্ক তৈরি হচ্ছে...</Text>
               </View>
             ) : (
-              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.qualityListContainer}>
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.qualityGridContainer}>
                 {getSortedLinks().map((item, index) => (
-                  <TouchableOpacity key={index} style={styles.qualityCard} activeOpacity={0.7} onPress={() => handleDownloadExecute(item)}>
-                    <View style={styles.qualityInfoLeft}>
-                      <View style={styles.qualityIconBg}>
-                          <Ionicons name={downloadType === 'audio' ? "headset" : "videocam"} size={22} color="#00BFA5" />
-                      </View>
-                      <View style={{ marginLeft: 15 }}>
-                        <Text style={styles.qualityText}>{item.quality}</Text>
-                        <Text style={styles.qualitySubText}>{item.size || (downloadType === 'video' ? 'MP4 Format' : 'MP3 Format')}</Text>
-                      </View>
+                  <TouchableOpacity key={index} style={styles.gridCard} activeOpacity={0.7} onPress={() => handleDownloadExecute(item)}>
+                    <View style={styles.gridIconBg}>
+                        <Ionicons name={downloadType === 'audio' ? "headset" : "videocam"} size={26} color="#00BFA5" />
                     </View>
-                    <View style={styles.downloadIconBtn}>
-                        <Ionicons name="download-outline" size={20} color="#00BFA5" />
-                    </View>
+                    <Text style={styles.gridQualityText}>{item.quality}</Text>
+                    <Text style={styles.gridSizeText}>{item.size || (downloadType === 'video' ? 'MP4 Format' : 'MP3')}</Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
@@ -437,7 +427,7 @@ const styles = StyleSheet.create({
     recViewsInfo: { color: '#888', fontSize: 11, marginTop: 2 },
     
     // ==========================================
-    // 2D Premium Modal Styles
+    // Grid Download Modal Styles (Half Width)
     // ==========================================
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
     modalContent: { 
@@ -465,15 +455,34 @@ const styles = StyleSheet.create({
     loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     loadingText: { color: '#AAA', marginTop: 15, fontSize: 15 },
     
-    qualityListContainer: { paddingBottom: 10 },
-    qualityCard: { 
-        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', 
-        backgroundColor: '#282828', padding: 12, borderRadius: 16, marginBottom: 12, 
-        borderWidth: 1, borderColor: '#383838' 
+    // Grid Layout Styles
+    qualityGridContainer: { 
+        flexDirection: 'row', 
+        flexWrap: 'wrap', 
+        justifyContent: 'space-between', 
+        paddingBottom: 20 
     },
-    qualityInfoLeft: { flexDirection: 'row', alignItems: 'center' },
-    qualityIconBg: { backgroundColor: 'rgba(0, 191, 165, 0.1)', padding: 10, borderRadius: 12 },
-    qualityText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-    qualitySubText: { color: '#888', fontSize: 12, marginTop: 3 },
-    downloadIconBtn: { padding: 10 }
+    gridCard: {
+        width: '48%', // স্ক্রিনের অর্ধেক প্রস্থ (২% স্পেসিং এর জন্য)
+        backgroundColor: '#282828',
+        paddingVertical: 18,
+        paddingHorizontal: 10,
+        borderRadius: 16,
+        marginBottom: 15,
+        borderWidth: 1,
+        borderColor: '#383838',
+        alignItems: 'center',
+        justifyContent: 'center'
+    },
+    gridIconBg: {
+        backgroundColor: 'rgba(0, 191, 165, 0.1)',
+        width: 50,
+        height: 50,
+        borderRadius: 25,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 12
+    },
+    gridQualityText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+    gridSizeText: { color: '#888', fontSize: 12, marginTop: 4, textAlign: 'center' }
 });
