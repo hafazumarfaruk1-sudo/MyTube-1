@@ -39,7 +39,6 @@ export default function GlobalPlayer() {
     p.play();
   });
 
-  // অটো-হাইড কন্ট্রোল লজিক
   const triggerControls = () => {
     setShowControls(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
@@ -67,7 +66,16 @@ export default function GlobalPlayer() {
   const fetchStreamUrl = async (vidId, targetQuality, fetchId) => {
     try {
       const isAuto = targetQuality === 'Auto';
-      const reqQ = isAuto ? 720 : (parseInt(targetQuality.toString().split('p')[0]) || 720);
+      let reqQ = 720;
+      
+      // 🚨 বাগ ফিক্স: 8K, 4K, 2K কোয়ালিটি এখন সঠিকভাবে সংখ্যায় রূপান্তর হবে
+      if (!isAuto) {
+          const qStr = targetQuality.toString().toUpperCase();
+          if (qStr.includes('8K') || qStr.includes('4320')) reqQ = 4320;
+          else if (qStr.includes('4K') || qStr.includes('2160')) reqQ = 2160;
+          else if (qStr.includes('2K') || qStr.includes('1440')) reqQ = 1440;
+          else reqQ = parseInt(qStr.replace(/\D/g, '')) || 720;
+      }
       
       const res = await fetch(`${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${vidId}`)}&quality=${reqQ}&action=play`);
       const json = await res.json();
@@ -76,8 +84,10 @@ export default function GlobalPlayer() {
 
       if (json.success && json.url) {
           const resQ = parseInt(json.quality) || 720;
+          
+          // যদি রিকোয়েস্ট করা কোয়ালিটি না মিলে, তবে ইউজারের পারমিশন চাইবে
           if (!isAuto && reqQ > resQ) {
-              setFallbackData({ reqQ, resQ, data: json, message: `Requested ${reqQ}p is not available. Play ${resQ}p instead?` });
+              setFallbackData({ reqQ, resQ, data: json, message: `Requested ${reqQ}p (or 8K) is not available. Play highest quality ${resQ}p instead?` });
               return;
           }
           startPlayback(json);
@@ -89,14 +99,13 @@ export default function GlobalPlayer() {
     setStreamMode(json.streamType || 'combined');
     setStreamUrl(json.url);
     
-    // ভিডিওর সাথে অডিও সিঙ্ক করার লজিক (DASH/Separate Streams)
     if (json.audioUrl) {
         await syncAudioRef.current.unloadAsync().catch(()=>{});
         await syncAudioRef.current.loadAsync({ uri: json.audioUrl }, { shouldPlay: true }).catch(()=>{});
     }
   };
 
-  // অডিও-ভিডিও সিঙ্কিং লজিক (ExoPlayer Engine)
+  // অডিও-ভিডিও সিঙ্কিং লজিক
   useEffect(() => {
     const interval = setInterval(async () => {
         if (streamMode === 'separate' && player.playing) {
@@ -130,7 +139,7 @@ export default function GlobalPlayer() {
           />
         )}
 
-        {/* অডিও মোড এবং অন্যান্য ওভারলে */}
+        {/* অডিও মোড */}
         {isAudioMode && (
           <View style={styles.audioOverlay}><Ionicons name="headset" size={80} color="#FF0000" /></View>
         )}
