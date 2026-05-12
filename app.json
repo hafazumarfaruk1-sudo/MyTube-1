@@ -27,11 +27,6 @@
         "backgroundColor": "#0F0F0F"
       },
       "package": "com.imtiaz.biodigitaltruth",
-      "softwareKeyboardLayoutMode": "pan",
-      "navigationBar": {
-        "backgroundColor": "#000000",
-        "barStyle": "light-content"
-      },
       "permissions": [
         "WRITE_EXTERNAL_STORAGE",
         "READ_EXTERNAL_STORAGE",
