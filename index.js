@@ -1,16 +1,1 @@
-import { registerRootComponent } from 'expo';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import React from 'react';
-
-import App from './App';
-
-// Wrap App with GestureHandlerRootView to avoid gesture errors
-function Root() {
-  return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <App />
-    </GestureHandlerRootView>
-  );
-}
-
-registerRootComponent(Root);
+import { registerRootComponent } from 'expo'; import App from './App'; // registerRootComponent calls AppRegistry.registerCompon ent('main', () => App); // It also ensures that whether you load the app in Expo Go or in a native build, // the environment is set up appropriately registerRootComponent (App);
