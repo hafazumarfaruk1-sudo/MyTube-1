@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "BioDigital-Player",
-    "slug": "bio-digital-truth",
+    "slug": "mytube-biodigital-player",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
