@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Animated, PanResponder, TouchableOpacity, Text, LogBox, BackHandler, TouchableWithoutFeedback, useWindowDimensions } from 'react-native';
+import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video'; 
 import { Audio } from 'expo-av'; 
 import { Ionicons } from '@expo/vector-icons';
@@ -10,6 +10,15 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 
 LogBox.ignoreLogs(['[expo-av]', 'Video component from `expo-av`']);
 
+// 🚨 আপনার লজিক অনুযায়ী একদম ফিক্সড সাইজ (Fixed Size) সেট করা হলো 🚨
+const windowDim = Dimensions.get('window');
+const PORTRAIT_WIDTH = Math.min(windowDim.width, windowDim.height);
+const PORTRAIT_HEIGHT = Math.max(windowDim.width, windowDim.height);
+
+const PLAYER_HEIGHT = (PORTRAIT_WIDTH * 9) / 16;
+const MINI_WIDTH = PORTRAIT_WIDTH * 0.45;
+const MINI_HEIGHT = (MINI_WIDTH * 9) / 16;
+
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
 
 export default function GlobalPlayer() {
@@ -18,15 +27,6 @@ export default function GlobalPlayer() {
   const syncAudioRef = useRef(new Audio.Sound()); 
   const currentVideoIdRef = useRef(null);
   const fetchIdRef = useRef(0);
-  
-  // 🚨 স্ক্রিনের মাপ নেওয়ার স্মার্ট লজিক 🚨
-  const { width, height } = useWindowDimensions();
-  const portraitWidth = Math.min(width, height); 
-  const portraitHeight = Math.max(width, height); 
-  
-  const PLAYER_HEIGHT = (portraitWidth * 9) / 16;
-  const MINI_WIDTH = portraitWidth * 0.45;
-  const MINI_HEIGHT = (MINI_WIDTH * 9) / 16;
   
   const scale = useRef(new Animated.Value(1)).current;
   const baseScaleRef = useRef(1);
@@ -73,7 +73,10 @@ export default function GlobalPlayer() {
       if (currentRoute !== 'Player' && currentRoute !== 'PlayerScreen') {
           setPlayerState((prev) => {
               if (prev === 'full' || prev === 'center' || prev === 'fullscreen') {
-                  if (isFullscreen) toggleFullscreen(); 
+                  if (isFullscreen) {
+                      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+                      setIsFullscreen(false);
+                  }
                   return 'mini';
               }
               return prev;
@@ -100,27 +103,26 @@ export default function GlobalPlayer() {
     return () => backHandler.remove();
   }, [playerState, navigation, isFullscreen]);
 
-  // 🚨 ফিক্স: প্লেয়ারের অবস্থা বদলালে জুম ১০০% রিসেট করা 🚨
   useEffect(() => {
-      scale.setValue(1);
-      baseScaleRef.current = 1;
       Animated.spring(scale, { toValue: 1, useNativeDriver: false }).start();
-  }, [playerState, isFullscreen]);
+      baseScaleRef.current = 1;
+  }, [playerState]);
 
+  // 🚨 আপনার লজিক: ফুলস্ক্রিন এবং সাধারণ স্ক্রিনের মাঝে সংযোগ বিচ্ছিন্ন 🚨
   const toggleFullscreen = async () => {
-    // ফুলস্ক্রিন করার আগে জুম রিসেট
-    scale.setValue(1);
-    baseScaleRef.current = 1;
-    
     try {
         if (isFullscreen) {
             await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
             setIsFullscreen(false);
-            setPlayerState('full');
+            setPlayerState('full'); // সরাসরি পুরনো ফিক্সড স্টেটে পাঠানো হলো
+            scale.setValue(1); // জুম রিসেট
+            baseScaleRef.current = 1;
         } else {
             await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
             setIsFullscreen(true);
             setPlayerState('fullscreen');
+            scale.setValue(1); // জুম রিসেট
+            baseScaleRef.current = 1;
         }
     } catch (error) { console.log(error); }
   };
@@ -288,8 +290,8 @@ export default function GlobalPlayer() {
               });
           } 
           else if (Math.abs(gestureState.dx) < 15 && Math.abs(gestureState.dy) < 15) {
-              const screenWidth = width;
-              const side = gestureState.x0 < (screenWidth / 2) ? 'left' : 'right';
+              // স্ক্রিনের মাঝখান বরাবর ট্যাপ চেক করা
+              const side = gestureState.x0 < (PORTRAIT_WIDTH / 2) ? 'left' : 'right';
               handleTap(side);
           }
       },
@@ -310,8 +312,8 @@ export default function GlobalPlayer() {
     onPanResponderRelease: () => {
       pan.flattenOffset();
       let x = pan.x._value, y = pan.y._value;
-      if (x > 10) x = 10; if (x < -(portraitWidth - MINI_WIDTH - 20)) x = -(portraitWidth - MINI_WIDTH - 20);
-      if (y > 20) y = 20; if (y < -(portraitHeight - MINI_HEIGHT - 120)) y = -(portraitHeight - MINI_HEIGHT - 120);
+      if (x > 10) x = 10; if (x < -(PORTRAIT_WIDTH - MINI_WIDTH - 20)) x = -(PORTRAIT_WIDTH - MINI_WIDTH - 20);
+      if (y > 20) y = 20; if (y < -(PORTRAIT_HEIGHT - MINI_HEIGHT - 120)) y = -(PORTRAIT_HEIGHT - MINI_HEIGHT - 120);
       Animated.spring(pan, { toValue: { x, y }, friction: 6, useNativeDriver: false }).start();
     }
   })).current;
@@ -357,22 +359,13 @@ export default function GlobalPlayer() {
   if (playerState === 'hidden') return null;
   const isInteractiveFull = playerState === 'full' || playerState === 'center' || playerState === 'fullscreen';
 
-  // 🚨 ফিক্স: প্লেয়ারের মাপে জোর করে সাইজ ঠিক রাখা হলো 🚨
-  let containerStyle;
-  if (playerState === 'fullscreen') {
-      containerStyle = [styles.fullscreenContainer, { width: width, height: height }];
-  } else if (playerState === 'full') {
-      containerStyle = [styles.fullContainer, { width: portraitWidth, height: PLAYER_HEIGHT }];
-  } else if (playerState === 'center') {
-      containerStyle = [styles.centerContainer, { width: portraitWidth, height: portraitHeight }];
-  } else {
-      containerStyle = [styles.miniContainer, { width: MINI_WIDTH, height: MINI_HEIGHT }];
-  }
-
   return (
     <Animated.View 
         style={[
-            containerStyle, 
+            playerState === 'fullscreen' ? styles.fullscreenContainer : 
+            playerState === 'full' ? styles.fullContainer : 
+            playerState === 'center' ? styles.centerContainer : 
+            styles.miniContainer, 
             playerState === 'mini' && { transform: pan.getTranslateTransform() }
         ]} 
         {...(!isInteractiveFull ? miniPanResponder.panHandlers : {})}
@@ -384,7 +377,7 @@ export default function GlobalPlayer() {
               <VideoView 
                 ref={videoViewRef} 
                 player={player} 
-                style={{ width: '100%', height: '100%' }} // জোর করে ফুল সাইজ
+                style={styles.video} 
                 contentFit="contain"
                 nativeControls={false} 
               />
@@ -475,14 +468,16 @@ export default function GlobalPlayer() {
 }
 
 const styles = StyleSheet.create({
-  fullscreenContainer: { position: 'absolute', top: 0, left: 0, zIndex: 99999, backgroundColor: '#000', overflow: 'hidden' }, 
-  fullContainer: { position: 'absolute', top: 55, left: 0, zIndex: 9999, backgroundColor: '#000', overflow: 'hidden' },
-  centerContainer: { position: 'absolute', top: 0, left: 0, zIndex: 9999, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
-  miniContainer: { position: 'absolute', bottom: 100, right: 20, backgroundColor: '#000', borderRadius: 15, overflow: 'hidden', elevation: 10, borderWidth: 1, borderColor: '#00FF00' },
+  fullscreenContainer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, backgroundColor: '#000', overflow: 'hidden' }, 
+  // 🚨 আপনার লজিক: ফিক্সড সাইজ কন্টেইনার 🚨
+  fullContainer: { position: 'absolute', top: 55, left: 0, width: PORTRAIT_WIDTH, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000', overflow: 'hidden' },
+  centerContainer: { position: 'absolute', top: 0, left: 0, width: PORTRAIT_WIDTH, height: PORTRAIT_HEIGHT, zIndex: 9999, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  miniContainer: { position: 'absolute', bottom: 100, right: 20, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', borderRadius: 15, overflow: 'hidden', elevation: 10, borderWidth: 1, borderColor: '#00FF00' },
   
-  videoWrapper: { flex: 1, justifyContent: 'center', width: '100%' },
+  videoWrapper: { flex: 1, justifyContent: 'center', width: '100%', height: '100%' },
   videoWrapperCentered: { width: '100%', height: '100%', justifyContent: 'center', position: 'relative' },
   animatedVideoWrapper: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }, 
+  video: { width: '100%', height: '100%' },
   
   tapOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', zIndex: 5 }, 
   tapHalf: { flex: 1 },
