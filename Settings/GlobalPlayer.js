@@ -11,7 +11,6 @@ import * as WebBrowser from 'expo-web-browser';
 
 LogBox.ignoreLogs(['[expo-av]', 'Video component from `expo-av`']);
 
-// 🚨 আপনার দেওয়া ফিক্সড ডাইমেনশন লজিক (১০০% হুবহু) 🚨
 const windowDim = Dimensions.get('window');
 const PORTRAIT_WIDTH = Math.min(windowDim.width, windowDim.height);
 const PORTRAIT_HEIGHT = Math.max(windowDim.width, windowDim.height);
@@ -48,16 +47,21 @@ export default function GlobalPlayer() {
 
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(1);
+  const [isPlayingUI, setIsPlayingUI] = useState(false); // আইকন আপডেটের জন্য
 
   const [showControls, setShowControls] = useState(true);
   const controlsTimeoutRef = useRef(null);
   
-  // সেটিংস এবং স্পিড মেনুর স্টেট
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const [currentSpeed, setCurrentSpeed] = useState(1.0);
   
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+
+  // রেফারেন্স ভেরিয়েবল লিসেনারের ভেতরে সঠিক ডাটা পাওয়ার জন্য
+  const isAudioModeRef = useRef(false);
+  const streamModeRef = useRef('combined');
+  const cachedAudioUrlRef = useRef(null); 
 
   const player = useVideoPlayer(streamUrl, (p) => {
     p.loop = false;
@@ -71,7 +75,6 @@ export default function GlobalPlayer() {
     controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 3000);
   };
 
-  // 🚨 ব্যাকগ্রাউন্ডে অডিও সচল রাখার পারমিশন সেটআপ 🚨
   useEffect(() => {
     const setupAudio = async () => {
       try {
@@ -110,7 +113,6 @@ export default function GlobalPlayer() {
     return unsubscribe;
   }, [navigation, isFullscreen]);
 
-  // স্মার্ট ব্যাক নেভিগেশন
   const handleSmartBack = () => {
       if (playerState === 'fullscreen') {
           toggleFullscreen(); 
@@ -186,9 +188,12 @@ export default function GlobalPlayer() {
       setPlayerState('full');
       setStreamUrl(null);
       setFallbackData(null);
-      setIsAudioMode(false);
-      setCurrentTime(0);
       
+      setIsAudioMode(false);
+      isAudioModeRef.current = false;
+      cachedAudioUrlRef.current = null;
+      
+      setCurrentTime(0);
       scale.setValue(1);
       baseScaleRef.current = 1;
       triggerControls();
@@ -200,9 +205,66 @@ export default function GlobalPlayer() {
       fetchStreamUrl(data.videoId, targetQuality, fetchIdRef.current);
     });
 
-    // 🚨 PlayerScreen থেকে অডিও মোড টগল লিসেন করার জন্য 🚨
-    const audioModeSub = DeviceEventEmitter.addListener('toggleAudioMode', (mode) => {
+    // 🚨 সম্পূর্ণ নতুন লজিক: অডিও মোড টগল এবং সার্ভার ফেচ 🚨
+    const audioModeSub = DeviceEventEmitter.addListener('toggleAudioMode', async (mode) => {
       setIsAudioMode(mode);
+      isAudioModeRef.current = mode;
+
+      if (mode) {
+          // ১. অডিও মোডে গেলে ভিডিও পুরোপুরি থামিয়ে দিন (যাতে ব্যাকগ্রাউন্ডে প্লেয়ার ক্র্যাশ না করে)
+          const timeToResume = player.currentTime;
+          player.pause(); 
+
+          let audioUrlToPlay = cachedAudioUrlRef.current;
+
+          // ২. যদি আলাদা অডিও লিংক সেভ না থাকে, সার্ভার থেকে শুধু অডিও লিংকটি চেয়ে নিন
+          if (!audioUrlToPlay) {
+              try {
+                  const res = await fetch(`${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&action=play&type=audio`);
+                  const json = await res.json();
+                  if (json.success && (json.audioUrl || json.url)) {
+                      audioUrlToPlay = json.audioUrl || json.url;
+                      cachedAudioUrlRef.current = audioUrlToPlay; // সেভ করে রাখা হলো
+                  }
+              } catch (e) { console.log(e); }
+          }
+
+          // ৩. ঠিক সেই সেকেন্ড থেকে ডেডিকেটেড অডিও ইঞ্জিনে প্লে শুরু করুন
+          if (audioUrlToPlay) {
+              await syncAudioRef.current.unloadAsync().catch(()=>{});
+              syncAudioRef.current = new Audio.Sound();
+              await syncAudioRef.current.loadAsync(
+                  { uri: audioUrlToPlay }, 
+                  { shouldPlay: true, positionMillis: timeToResume * 1000, rate: currentSpeed }
+              ).catch(()=>{});
+          }
+
+      } else {
+          // ১. ভিডিও মোডে ফিরলে অডিও স্ট্যাটাস চেক করে প্লেয়ারের টাইম সেট করুন
+          const status = await syncAudioRef.current.getStatusAsync();
+          let resumeVideoTime = player.currentTime;
+
+          if (status.isLoaded) {
+              resumeVideoTime = status.positionMillis / 1000;
+              
+              if (streamModeRef.current !== 'separate') {
+                  // কম্বাইন্ড স্ট্রিম হলে অডিও পুরোপুরি আনলোড করে দিন
+                  await syncAudioRef.current.unloadAsync().catch(()=>{});
+              } else {
+                  // সেপারেট স্ট্রিম হলে অডিও শুধু পজ করে রাখুন
+                  await syncAudioRef.current.pauseAsync().catch(()=>{});
+              }
+          }
+
+          // ২. ভিডিও প্লেয়ারকে আপডেট করুন এবং প্লে শুরু করুন
+          player.currentTime = resumeVideoTime;
+          player.play();
+
+          // সেপারেট স্ট্রিম হলে অডিও পুনরায় চালু করুন
+          if (streamModeRef.current === 'separate' && status.isLoaded) {
+              await syncAudioRef.current.playAsync().catch(()=>{});
+          }
+      }
     });
 
     return () => {
@@ -238,6 +300,9 @@ export default function GlobalPlayer() {
 
   const startPlayback = async (json) => {
     setStreamMode(json.streamType || 'combined');
+    streamModeRef.current = json.streamType || 'combined';
+    cachedAudioUrlRef.current = json.audioUrl || null; // যদি সেপারেট অডিও থাকে, সেভ করে রাখলাম
+    
     setStreamUrl(json.url);
     if (json.audioUrl) {
         await syncAudioRef.current.unloadAsync().catch(()=>{});
@@ -250,14 +315,20 @@ export default function GlobalPlayer() {
   };
 
   const handleSkip = async (amount, isSilent = false) => {
-      let newTime = player.currentTime + amount;
+      let currentPosition = isAudioMode ? currentTime : player.currentTime;
+      let newTime = currentPosition + amount;
+      
       if (newTime < 0) newTime = 0;
-      if (newTime > player.duration) newTime = player.duration;
+      if (newTime > duration) newTime = duration;
       
-      player.currentTime = newTime; 
+      if (isAudioMode) {
+          await syncAudioRef.current.setPositionAsync(newTime * 1000);
+      } else {
+          player.currentTime = newTime; 
+          if (streamMode === 'separate') await syncAudioWithVideo(newTime); 
+      }
+      
       setCurrentTime(newTime);
-      if (streamMode === 'separate') await syncAudioWithVideo(newTime); 
-      
       if (!isSilent) triggerControls(); 
   };
 
@@ -268,7 +339,6 @@ export default function GlobalPlayer() {
       if (lastTapRef.current.side === side && (now - lastTapRef.current.time) < DOUBLE_TAP_DELAY) {
           clearTimeout(tapTimeoutRef.current);
           lastTapRef.current = { time: 0, side: '' }; 
-          
           handleSkip(side === 'right' ? 10 : -10, true); 
       } else {
           lastTapRef.current = { time: now, side };
@@ -336,10 +406,7 @@ export default function GlobalPlayer() {
               setPlayerState(prev => {
                   if (prev === 'fullscreen') { toggleFullscreen(); return 'mini'; }
                   if (prev === 'full') return 'center'; 
-                  if (prev === 'center') {
-                      handleSmartBack(); 
-                      return 'mini'; 
-                  }
+                  if (prev === 'center') { handleSmartBack(); return 'mini'; }
                   return prev;
               });
           } else if (gestureState.dy < -50 && Math.abs(gestureState.vy) > 0.5) {
@@ -376,28 +443,44 @@ export default function GlobalPlayer() {
     }
   })).current;
 
+  // 🚨 টাইম আপডেট এবং সিঙ্ক লজিক 🚨
   useEffect(() => {
     const interval = setInterval(async () => {
-        if (!isSlidingRef.current && player) {
-            setCurrentTime(player.currentTime);
-            setDuration(player.duration > 0 ? player.duration : 1);
-        }
-
-        if (streamMode === 'separate') {
+        if (isAudioMode) {
+            // অডিও মোডে থাকলে স্লাইডার এবং প্লে বাটন অডিও ট্র্যাকের উপর নির্ভর করবে
             const audioStatus = await syncAudioRef.current.getStatusAsync();
             if (audioStatus.isLoaded) {
-                if (player.playing) {
-                    const diff = Math.abs((player.currentTime * 1000) - audioStatus.positionMillis);
-                    if (diff > 500) await syncAudioRef.current.setPositionAsync(player.currentTime * 1000);
-                    if (!audioStatus.isPlaying) await syncAudioRef.current.playAsync();
-                } else {
-                    if (audioStatus.isPlaying) await syncAudioRef.current.pauseAsync().catch(()=>{});
+                setIsPlayingUI(audioStatus.isPlaying);
+                if (!isSlidingRef.current) {
+                    setCurrentTime(audioStatus.positionMillis / 1000);
+                    if (audioStatus.durationMillis) setDuration(audioStatus.durationMillis / 1000);
+                }
+            }
+        } else {
+            // ভিডিও মোডে ভিডিও প্লেয়ারের উপর নির্ভর করবে
+            setIsPlayingUI(player?.playing || false);
+            
+            if (!isSlidingRef.current && player) {
+                setCurrentTime(player.currentTime);
+                setDuration(player.duration > 0 ? player.duration : 1);
+            }
+
+            if (streamMode === 'separate') {
+                const audioStatus = await syncAudioRef.current.getStatusAsync();
+                if (audioStatus.isLoaded) {
+                    if (player.playing) {
+                        const diff = Math.abs((player.currentTime * 1000) - audioStatus.positionMillis);
+                        if (diff > 500) await syncAudioRef.current.setPositionAsync(player.currentTime * 1000);
+                        if (!audioStatus.isPlaying) await syncAudioRef.current.playAsync();
+                    } else {
+                        if (audioStatus.isPlaying) await syncAudioRef.current.pauseAsync().catch(()=>{});
+                    }
                 }
             }
         }
     }, 1000);
     return () => clearInterval(interval);
-  }, [player, streamMode]);
+  }, [player, streamMode, isAudioMode]);
 
   const closePlayer = async () => {
       setPlayerState('hidden');
@@ -430,7 +513,6 @@ export default function GlobalPlayer() {
     >
       <View style={styles.videoWrapper}>
         
-        {/* 🚨 [পরিবর্তিত] ভিডিওটি আগের মতোই থাকবে, শুধু অডিও মোডে একটি কালো পর্দা পড়বে 🚨 */}
         {streamUrl && !fallbackData && (
           <View style={{ flex: 1, width: '100%', height: '100%' }}>
             
@@ -444,12 +526,14 @@ export default function GlobalPlayer() {
                 />
             </Animated.View>
 
-            {/* 🚨 শুধু অডিও মোড অন থাকলে ভিডিওর ওপরে এই কালো পর্দাটি ভেসে উঠবে (zIndex: 10) 🚨 */}
             {isAudioMode && (
                 <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', zIndex: 10 }]}>
-                    <Ionicons name="musical-notes" size={60} color="#00BFA5" />
-                    <Text style={{ color: '#00BFA5', marginTop: 10, fontSize: 16, fontWeight: 'bold' }}>
-                        অডিও মোড চলছে (ভিডিও লুকানো আছে)
+                    <Ionicons name="headset" size={60} color="#00BFA5" />
+                    <Text style={{ color: '#00BFA5', marginTop: 15, fontSize: 16, fontWeight: 'bold' }}>
+                        ব্যাকগ্রাউন্ড অডিও মোড চলছে
+                    </Text>
+                    <Text style={{ color: '#888', marginTop: 5, fontSize: 12 }}>
+                        ভিডিও বন্ধ করা হয়েছে, শুধুমাত্র অডিও প্লে হচ্ছে
                     </Text>
                 </View>
             )}
@@ -478,16 +562,23 @@ export default function GlobalPlayer() {
              
              <View style={styles.centerRow} pointerEvents="box-none">
                 <TouchableOpacity onPress={async () => {
-                    if (player.playing) {
-                        player.pause();
-                        if (streamMode === 'separate') await syncAudioRef.current.pauseAsync().catch(()=>{});
+                    // অডিও এবং ভিডিও মোড অনুযায়ী প্লে/পজ লজিক
+                    if (isAudioMode) {
+                        const status = await syncAudioRef.current.getStatusAsync();
+                        if (status.isPlaying) await syncAudioRef.current.pauseAsync();
+                        else await syncAudioRef.current.playAsync();
                     } else {
-                        player.play();
-                        if (streamMode === 'separate') await syncAudioRef.current.playAsync().catch(()=>{});
+                        if (player.playing) {
+                            player.pause();
+                            if (streamMode === 'separate') await syncAudioRef.current.pauseAsync().catch(()=>{});
+                        } else {
+                            player.play();
+                            if (streamMode === 'separate') await syncAudioRef.current.playAsync().catch(()=>{});
+                        }
                     }
                     triggerControls();
                 }}>
-                   <Ionicons name={player.playing ? "pause-circle" : "play-circle"} size={75} color="#FFF" />
+                   <Ionicons name={isPlayingUI ? "pause-circle" : "play-circle"} size={75} color="#FFF" />
                 </TouchableOpacity>
              </View>
 
@@ -505,8 +596,13 @@ export default function GlobalPlayer() {
                   }}
                   onValueChange={(v) => setCurrentTime(v)} 
                   onSlidingComplete={async (v) => {
-                      player.currentTime = v; 
-                      if (streamMode === 'separate') await syncAudioWithVideo(v);
+                      // স্লাইডার টানলেও অডিও/ভিডিও সঠিক জায়গায় যাবে
+                      if (isAudioMode) {
+                          await syncAudioRef.current.setPositionAsync(v * 1000);
+                      } else {
+                          player.currentTime = v; 
+                          if (streamMode === 'separate') await syncAudioWithVideo(v);
+                      }
                       isSlidingRef.current = false; 
                       triggerControls();
                   }}
@@ -530,11 +626,8 @@ export default function GlobalPlayer() {
                     <TouchableOpacity style={styles.menuItem} onPress={() => {
                         setShowSettingsMenu(false);
                         const ytUrl = `https://www.youtube.com/watch?v=${currentVideoIdRef.current}?app=desktop`; 
-                        
                         Linking.openURL(`googlechrome://navigate?url=${ytUrl}`).catch(() => {
-                            WebBrowser.openBrowserAsync(ytUrl, {
-                                presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
-                            });
+                            WebBrowser.openBrowserAsync(ytUrl, { presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN });
                         });
                     }}>
                         <Ionicons name="globe-outline" size={20} color="#FFF" style={styles.menuIcon} />
