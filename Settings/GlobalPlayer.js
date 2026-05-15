@@ -1,418 +1,644 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, ActivityIndicator, Image, LogBox } from 'react-native';
-import { Audio } from 'expo-av'; // অডিও এবং ব্যাকগ্রাউন্ডের জন্য
-import Video from 'expo-av'; // [NEW]: মেইন ভিডিওর জন্য নেটিভ প্যাকেজ
+import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking } from 'react-native';
+import { useVideoPlayer, VideoView } from 'expo-video'; 
+import { Audio } from 'expo-av'; 
 import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import Slider from '@react-native-community/slider';
+import * as ScreenOrientation from 'expo-screen-orientation'; 
+import * as WebBrowser from 'expo-web-browser'; 
 
-LogBox.ignoreLogs(['[expo-av] Expo AV has been deprecated']);
+LogBox.ignoreLogs(['[expo-av]', 'Video component from `expo-av`']);
 
-const { width, height } = Dimensions.get('window');
-const PLAYER_HEIGHT = (width * 9) / 16;
-const MINI_WIDTH = width * 0.45;
+// 🚨 আপনার দেওয়া ফিক্সড ডাইমেনশন লজিক (১০০% হুবহু) 🚨
+const windowDim = Dimensions.get('window');
+const PORTRAIT_WIDTH = Math.min(windowDim.width, windowDim.height);
+const PORTRAIT_HEIGHT = Math.max(windowDim.width, windowDim.height);
+
+const PLAYER_HEIGHT = (PORTRAIT_WIDTH * 9) / 16;
+const MINI_WIDTH = PORTRAIT_WIDTH * 0.45;
 const MINI_HEIGHT = (MINI_WIDTH * 9) / 16;
-const MY_API_SERVER = "http://127.0.0.1:10000"; 
 
-const getNumericQuality = (q) => {
-    if (!q || String(q).toLowerCase() === 'auto') return '720';
-    const match = String(q).match(/\d+/);
-    return match ? match[0] : '720';
-};
+const MY_API_SERVER = "http://127.0.0.1:10000"; 
 
 export default function GlobalPlayer() {
   const navigation = useNavigation();
-  const videoRef = useRef(null);
-  const audioRef = useRef(null); 
+  const videoViewRef = useRef(null); 
   const syncAudioRef = useRef(new Audio.Sound()); 
-
-  const seekPosRef = useRef(0);
   const currentVideoIdRef = useRef(null);
-  const isLocalRef = useRef(false);
-  const isAudioModeRef = useRef(false); 
+  const fetchIdRef = useRef(0);
+  
+  const scale = useRef(new Animated.Value(1)).current;
+  const baseScaleRef = useRef(1);
+  const initialDistanceRef = useRef(null);
+  const isZoomingRef = useRef(false);
+  
+  const lastTapRef = useRef({ time: 0, side: '' });
+  const tapTimeoutRef = useRef(null);
+  const isSlidingRef = useRef(false); 
 
-  const [currentQuality, setCurrentQuality] = useState(global.appSettings?.normalVideo || '720p');
   const [playerState, setPlayerState] = useState('hidden'); 
+  const [isFullscreen, setIsFullscreen] = useState(false); 
   const [videoData, setVideoData] = useState(null);
   const [streamUrl, setStreamUrl] = useState(null);
-  const [audioStreamUrl, setAudioStreamUrl] = useState(null); 
-  const [streamMode, setStreamMode] = useState('combined'); 
-
-  const [isPlaying, setIsPlaying] = useState(true);
-  const [errorMsg, setErrorMsg] = useState(null);
-  const [videoKey, setVideoKey] = useState(Date.now().toString()); 
-
+  const [streamMode, setStreamMode] = useState('combined');
   const [isAudioMode, setIsAudioMode] = useState(false);
-  const [isSwitching, setIsSwitching] = useState(false); 
+  const [fallbackData, setFallbackData] = useState(null);
 
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(1);
+
+  const [showControls, setShowControls] = useState(true);
+  const controlsTimeoutRef = useRef(null);
+  
+  // সেটিংস এবং স্পিড মেনুর স্টেট
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  const [currentSpeed, setCurrentSpeed] = useState(1.0);
+  
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
-  const checkIsMuxed = () => {
-      if (isLocalRef.current) return true; 
-      global.appSettings = global.appSettings || {};
-      const currentQNum = parseInt(getNumericQuality(global.appSettings.normalVideo || '720'));
-      return [360, 480, 720].includes(currentQNum) || streamMode === 'combined';
+  const player = useVideoPlayer(streamUrl, (p) => {
+    p.loop = false;
+    p.playbackRate = currentSpeed; 
+    p.play();
+  });
+
+  const triggerControls = () => {
+    setShowControls(true);
+    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 3000);
   };
 
-  const setBackgroundAudio = async (enable) => {
-    try {
+  // 🚨 ব্যাকগ্রাউন্ডে অডিও সচল রাখার পারমিশন সেটআপ 🚨
+  useEffect(() => {
+    const setupAudio = async () => {
+      try {
         await Audio.setAudioModeAsync({
-            staysActiveInBackground: enable,
-            playsInSilentModeIOS: true,
-            shouldDuckAndroid: true,
-            playThroughEarpieceAndroid: false,
+          staysActiveInBackground: true,
+          playsInSilentModeIOS: true,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
         });
-    } catch (e) {}
-  };
-
-  const fetchStreamUrl = async (vidId, targetQuality) => {
-    try {
-      const numQ = getNumericQuality(targetQuality);
-      const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${vidId}`)}&quality=${numQ}&merge=true&t=${Date.now()}`;
-
-      const res = await fetch(apiUrl);
-      const json = await res.json();
-
-      if (json.success && json.url) {
-          setStreamMode(json.streamType || 'combined');
-          setStreamUrl(json.url);
-          setAudioStreamUrl(json.audioUrl || json.url); 
-
-          if (json.streamType === 'separate' && json.audioUrl) {
-              try {
-                  await syncAudioRef.current.unloadAsync();
-                  await syncAudioRef.current.loadAsync(
-                      { uri: json.audioUrl },
-                      { shouldPlay: true, positionMillis: seekPosRef.current }
-                  );
-              } catch(e) {}
-          } else {
-              try { await syncAudioRef.current.unloadAsync(); } catch(e){}
-          }
-
-          setIsPlaying(true);
-          setErrorMsg(null);
-      } else {
-          setErrorMsg("This quality video is not available");
+      } catch (e) {
+        console.log("Audio Setup Error:", e);
       }
-    } catch(e) { 
-      setErrorMsg("সার্ভার কানেকশন এরর!");
-    }
-  };
-
-  // [UPDATED]: react-native-video এর জন্য নতুন সিঙ্ক লজিক
-  const handleProgress = async (data) => {
-    const currentPosMillis = data.currentTime * 1000;
-
-    if (streamMode === 'separate' && syncAudioRef.current && !isAudioMode) {
-        try {
-            const audioStatus = await syncAudioRef.current.getStatusAsync();
-            if (!audioStatus.isLoaded) return;
-
-            if (isPlaying && !audioStatus.isPlaying) {
-                await syncAudioRef.current.playAsync();
-            } else if (!isPlaying && audioStatus.isPlaying) {
-                await syncAudioRef.current.pauseAsync();
-            }
-
-            // যদি অডিও-ভিডিওর গ্যাপ ৭০০ মিলিসেকেন্ডের বেশি হয়, তবে সিঙ্ক করবে
-            if (isPlaying && Math.abs(currentPosMillis - audioStatus.positionMillis) > 700) {
-                await syncAudioRef.current.setPositionAsync(currentPosMillis);
-            }
-        } catch(e) {}
-    }
-  };
+    };
+    setupAudio();
+  }, []);
 
   useEffect(() => {
-    const unsubscribe = navigation.addListener('state', async () => {
-      const savedQuality = global.appSettings?.normalVideo || '720p';
-      if (savedQuality !== currentQuality && currentVideoIdRef.current && !isLocalRef.current) {
-          setCurrentQuality(savedQuality); 
-
-          setIsPlaying(false); 
-          setStreamUrl(null);  
-          setErrorMsg(null);
-
-          if (audioRef.current) {
-              try { await audioRef.current.unloadAsync(); } catch(e){}
-              audioRef.current = null;
-          }
-          try { await syncAudioRef.current.unloadAsync(); } catch(e){}
-
-          setVideoKey(Date.now().toString()); 
-          await fetchStreamUrl(currentVideoIdRef.current, savedQuality);
+    const unsubscribe = navigation.addListener('state', (e) => {
+      if (!e.data.state) return;
+      const routes = e.data.state.routes;
+      const currentRoute = routes[routes.length - 1].name;
+      
+      if (currentRoute !== 'Player' && currentRoute !== 'PlayerScreen') {
+          setPlayerState((prev) => {
+              if (prev === 'full' || prev === 'center' || prev === 'fullscreen') {
+                  if (isFullscreen) {
+                      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+                      setIsFullscreen(false);
+                  }
+                  return 'mini';
+              }
+              return prev;
+          });
       }
     });
     return unsubscribe;
-  }, [navigation, currentQuality]);
+  }, [navigation, isFullscreen]);
+
+  // স্মার্ট ব্যাক নেভিগেশন
+  const handleSmartBack = () => {
+      if (playerState === 'fullscreen') {
+          toggleFullscreen(); 
+          return true;
+      } else if (playerState === 'center' || playerState === 'full') {
+          setPlayerState('mini');
+          
+          const state = navigation.getState();
+          if (state && state.routes) {
+              const routes = state.routes;
+              for (let i = routes.length - 1; i >= 0; i--) {
+                  if (routes[i].name !== 'Player' && routes[i].name !== 'PlayerScreen') {
+                      navigation.navigate(routes[i].name);
+                      return true;
+                  }
+              }
+          }
+          navigation.navigate('Home'); 
+          return true;
+      }
+      return false;
+  };
 
   useEffect(() => {
-    const switchToAudioMode = async () => {
-        setIsSwitching(true);
-        setIsAudioMode(true);
-        isAudioModeRef.current = true;
-        await setBackgroundAudio(true); 
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', handleSmartBack);
+    return () => backHandler.remove();
+  }, [playerState, navigation, isFullscreen]);
 
-        try {
-            const isMuxed = checkIsMuxed();
+  useEffect(() => {
+      Animated.spring(scale, { toValue: 1, useNativeDriver: false }).start();
+      baseScaleRef.current = 1;
+  }, [playerState]);
 
-            if (isMuxed) {
-                setIsPlaying(true);
-            } else {
-                if (syncAudioRef.current) {
-                    try { await syncAudioRef.current.pauseAsync(); } catch(e){}
-                }
-
-                let targetAudioUrl = audioStreamUrl || streamUrl;
-
-                try {
-                    const { sound } = await Audio.Sound.createAsync(
-                        { uri: targetAudioUrl },
-                        { shouldPlay: true } 
-                    );
-                    audioRef.current = sound;
-                    setIsPlaying(true);
-                } catch(e){}
-            }
-        } catch (error) {}
-        setIsSwitching(false);
-    };
-
-    const switchToVideoMode = async () => {
-        setIsSwitching(true);
-        setIsAudioMode(false);
-        isAudioModeRef.current = false;
-        await setBackgroundAudio(false); 
-
-        try {
-            const isMuxed = checkIsMuxed();
-
-            if (isMuxed) {
-                setIsPlaying(true);
-                setIsSwitching(false);
-                return;
-            }
-
-            if (audioRef.current) {
-                try {
-                    await audioRef.current.unloadAsync(); 
-                } catch(e){}
-                audioRef.current = null;
-            }
-
-            try {
-                if (syncAudioRef.current && streamMode === 'separate') {
-                    await syncAudioRef.current.playAsync();
-                }
-            } catch(e){}
-
-            setIsPlaying(true);
-            setIsSwitching(false);
-        } catch (e) { setIsSwitching(false); }
-    };
-
-    const playSub = DeviceEventEmitter.addListener('playVideo', async (data) => {
-      const isAudio = data.videoData?.type === 'audio';
-
-      if (videoData?.id === data.videoId) {
-        setPlayerState('full');
-        if (isAudioModeRef.current) await switchToVideoMode();
-        else {
-            setIsAudioMode(isAudio);
-            isAudioModeRef.current = isAudio;
-            await setBackgroundAudio(isAudio);
+  const toggleFullscreen = async () => {
+    try {
+        if (isFullscreen) {
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+            setIsFullscreen(false);
+            setPlayerState('full'); 
+            scale.setValue(1); 
+            baseScaleRef.current = 1;
+        } else {
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+            setIsFullscreen(true);
+            setPlayerState('fullscreen');
+            scale.setValue(1); 
+            baseScaleRef.current = 1;
         }
-        return; 
-      }
+    } catch (error) { console.log(error); }
+  };
 
-      if (audioRef.current) { 
-          try { await audioRef.current.unloadAsync(); } catch(e){}
-          audioRef.current = null; 
-      }
-      try { await syncAudioRef.current.unloadAsync(); } catch(e){}
+  const syncAudioWithVideo = async (targetPositionSeconds) => {
+      try {
+          const status = await syncAudioRef.current.getStatusAsync();
+          if (status.isLoaded) {
+              await syncAudioRef.current.setPositionAsync(targetPositionSeconds * 1000);
+              if (player.playing) await syncAudioRef.current.playAsync();
+          }
+      } catch (e) {}
+  };
 
-      setIsAudioMode(isAudio);
-      isAudioModeRef.current = isAudio;
-      await setBackgroundAudio(isAudio); 
-
-      currentVideoIdRef.current = data.videoId;
-      isLocalRef.current = !!(data.videoData && data.videoData.localUri);
-
-      setVideoData(data.videoData);
-      setPlayerState('full');
-      setStreamUrl(null);
-      setAudioStreamUrl(null);
-      setErrorMsg(null);
-      setIsPlaying(true);
-      pan.setValue({ x: 0, y: 0 });
-
-      if (isLocalRef.current) {
-          setStreamMode('combined'); 
-          setStreamUrl(data.videoData.localUri);
-          setAudioStreamUrl(data.videoData.localUri);
+  useEffect(() => {
+    const playSub = DeviceEventEmitter.addListener('playVideo', async (data) => {
+      if (currentVideoIdRef.current === data.videoId) {
+          setPlayerState('full');
+          if (isFullscreen) toggleFullscreen();
           return;
       }
 
-      global.appSettings = global.appSettings || {};
-      const targetQuality = global.appSettings.normalVideo || '720p';
-      seekPosRef.current = 0; 
-      await fetchStreamUrl(data.videoId, targetQuality);
-    });
-
-    const minSub = DeviceEventEmitter.addListener('minimizeVideo', () => setPlayerState('mini'));
-    const maxSub = DeviceEventEmitter.addListener('maximizeVideo', () => { if (videoData) setPlayerState('full'); });
-
-    const toggleAudioSub = DeviceEventEmitter.addListener('toggleAudioMode', (mode) => {
-        if (mode) switchToAudioMode();
-        else switchToVideoMode();
-    });
-
-    const stopSub = DeviceEventEmitter.addListener('stopVideo', async () => {
-      await setBackgroundAudio(false); 
-      if (audioRef.current) { try { await audioRef.current.unloadAsync(); audioRef.current = null; } catch(e){} }
-      try { await syncAudioRef.current.unloadAsync(); } catch(e){}
-
-      setPlayerState('hidden');
+      fetchIdRef.current = Date.now();
+      currentVideoIdRef.current = data.videoId;
+      setVideoData(data.videoData);
+      setPlayerState('full');
       setStreamUrl(null);
-      setAudioStreamUrl(null);
-      setIsPlaying(false);
+      setFallbackData(null);
+      setIsAudioMode(false);
+      setCurrentTime(0);
+      
+      scale.setValue(1);
+      baseScaleRef.current = 1;
+      triggerControls();
+
+      await syncAudioRef.current.unloadAsync().catch(()=>{});
+      syncAudioRef.current = new Audio.Sound();
+
+      const targetQuality = global.appSettings?.normalVideo || '720p';
+      fetchStreamUrl(data.videoId, targetQuality, fetchIdRef.current);
     });
 
-    return () => { playSub.remove(); minSub.remove(); maxSub.remove(); toggleAudioSub.remove(); stopSub.remove(); };
-  }, [videoData, streamUrl, audioStreamUrl, streamMode]); 
+    // 🚨 PlayerScreen থেকে অডিও মোড টগল লিসেন করার জন্য 🚨
+    const audioModeSub = DeviceEventEmitter.addListener('toggleAudioMode', (mode) => {
+      setIsAudioMode(mode);
+    });
 
-  useEffect(() => {
     return () => {
-      if (audioRef.current) { try{ audioRef.current.unloadAsync(); } catch(e){} }
-      try { syncAudioRef.current.unloadAsync(); } catch(e){}
+        playSub.remove();
+        audioModeSub.remove();
     };
-  }, []);
+  }, [isFullscreen]);
 
-  const panResponder = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 3 || Math.abs(g.dy) > 3,
+  const fetchStreamUrl = async (vidId, targetQuality, fetchId) => {
+    try {
+      const qStr = targetQuality.toString().toUpperCase();
+      let reqQ = 720;
+      if (qStr.includes('8K') || qStr.includes('4320')) reqQ = 4320;
+      else if (qStr.includes('4K') || qStr.includes('2160')) reqQ = 2160;
+      else if (qStr.includes('2K') || qStr.includes('1440')) reqQ = 1440;
+      else reqQ = parseInt(qStr.replace(/\D/g, '')) || 720;
+      
+      const res = await fetch(`${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${vidId}`)}&quality=${reqQ}&action=play`);
+      const json = await res.json();
+
+      if (fetchId !== fetchIdRef.current) return;
+
+      if (json.success && json.url) {
+          const resQ = parseInt(json.quality) || 720;
+          if (reqQ > resQ) {
+              setFallbackData({ reqQ, resQ, data: json, message: `Requested ${reqQ}p is not available. Play ${resQ}p instead?` });
+              return;
+          }
+          startPlayback(json);
+      }
+    } catch(e) {}
+  };
+
+  const startPlayback = async (json) => {
+    setStreamMode(json.streamType || 'combined');
+    setStreamUrl(json.url);
+    if (json.audioUrl) {
+        await syncAudioRef.current.unloadAsync().catch(()=>{});
+        syncAudioRef.current = new Audio.Sound();
+        await syncAudioRef.current.loadAsync(
+            { uri: json.audioUrl }, 
+            { shouldPlay: true, volume: 1.0, rate: currentSpeed, shouldCorrectPitch: true, pitchCorrectionQuality: Audio.PitchCorrectionQuality.Low }
+        ).catch(()=>{});
+    }
+  };
+
+  const handleSkip = async (amount, isSilent = false) => {
+      let newTime = player.currentTime + amount;
+      if (newTime < 0) newTime = 0;
+      if (newTime > player.duration) newTime = player.duration;
+      
+      player.currentTime = newTime; 
+      setCurrentTime(newTime);
+      if (streamMode === 'separate') await syncAudioWithVideo(newTime); 
+      
+      if (!isSilent) triggerControls(); 
+  };
+
+  const handleTap = (side) => {
+      const now = Date.now();
+      const DOUBLE_TAP_DELAY = 300; 
+      
+      if (lastTapRef.current.side === side && (now - lastTapRef.current.time) < DOUBLE_TAP_DELAY) {
+          clearTimeout(tapTimeoutRef.current);
+          lastTapRef.current = { time: 0, side: '' }; 
+          
+          handleSkip(side === 'right' ? 10 : -10, true); 
+      } else {
+          lastTapRef.current = { time: now, side };
+          tapTimeoutRef.current = setTimeout(() => {
+              setShowControls(prev => {
+                  const next = !prev;
+                  if (next) triggerControls();
+                  return next;
+              });
+              lastTapRef.current = { time: 0, side: '' };
+          }, DOUBLE_TAP_DELAY);
+      }
+  };
+
+  const changeSpeed = async (speed) => {
+      setCurrentSpeed(speed);
+      if (player) player.playbackRate = speed;
+      if (syncAudioRef.current) {
+          await syncAudioRef.current.setRateAsync(speed, true, Audio.PitchCorrectionQuality.Low).catch(()=>{});
+      }
+      setShowSpeedMenu(false);
+      setShowSettingsMenu(false);
+  };
+
+  const videoPanResponder = useRef(PanResponder.create({
+      onStartShouldSetPanResponder: () => false, 
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+          const touches = evt.nativeEvent.touches;
+          if (touches && touches.length >= 2) return true; 
+          if (Math.abs(gestureState.dx) > 15 || Math.abs(gestureState.dy) > 15) return true; 
+          return false;
+      },
+      onPanResponderGrant: (evt) => {
+          const touches = evt.nativeEvent.touches;
+          if (touches && touches.length >= 2) {
+              isZoomingRef.current = true;
+              const dx = touches[0].pageX - touches[1].pageX;
+              const dy = touches[0].pageY - touches[1].pageY;
+              initialDistanceRef.current = Math.sqrt(dx*dx + dy*dy);
+          }
+      },
+      onPanResponderMove: (evt, gestureState) => {
+          const touches = evt.nativeEvent.touches;
+          if (touches && touches.length >= 2 && initialDistanceRef.current) {
+              isZoomingRef.current = true;
+              const dx = touches[0].pageX - touches[1].pageX;
+              const dy = touches[0].pageY - touches[1].pageY;
+              const currentDistance = Math.sqrt(dx*dx + dy*dy);
+
+              let newScale = baseScaleRef.current * (currentDistance / initialDistanceRef.current);
+              if (newScale < 0.2) newScale = 0.2; 
+              if (newScale > 6.0) newScale = 6.0; 
+              scale.setValue(newScale);
+          }
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+          if (isZoomingRef.current) {
+              baseScaleRef.current = scale._value;
+              initialDistanceRef.current = null;
+              setTimeout(() => { isZoomingRef.current = false; }, 100);
+              return;
+          }
+
+          if (gestureState.dy > 50 && Math.abs(gestureState.vy) > 0.5) {
+              setPlayerState(prev => {
+                  if (prev === 'fullscreen') { toggleFullscreen(); return 'mini'; }
+                  if (prev === 'full') return 'center'; 
+                  if (prev === 'center') {
+                      handleSmartBack(); 
+                      return 'mini'; 
+                  }
+                  return prev;
+              });
+          } else if (gestureState.dy < -50 && Math.abs(gestureState.vy) > 0.5) {
+              setPlayerState(prev => {
+                  if (prev === 'center') return 'full'; 
+                  return prev;
+              });
+          } 
+          else if (Math.abs(gestureState.dx) < 15 && Math.abs(gestureState.dy) < 15) {
+              const side = gestureState.x0 < (PORTRAIT_WIDTH / 2) ? 'left' : 'right';
+              handleTap(side);
+          }
+      },
+      onPanResponderTerminate: () => {
+          if (isZoomingRef.current) {
+              baseScaleRef.current = scale._value;
+              initialDistanceRef.current = null;
+              isZoomingRef.current = false;
+          }
+      }
+  })).current;
+
+  const miniPanResponder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => false, 
+    onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 10 || Math.abs(gestureState.dy) > 10,
     onPanResponderGrant: () => { pan.setOffset({ x: pan.x._value, y: pan.y._value }); pan.setValue({ x: 0, y: 0 }); },
     onPanResponderMove: Animated.event([null, { dx: pan.x, dy: pan.y }], { useNativeDriver: false }),
     onPanResponderRelease: () => {
       pan.flattenOffset();
       let x = pan.x._value, y = pan.y._value;
-      if (x > 10) x = 10; if (x < -(width - MINI_WIDTH - 20)) x = -(width - MINI_WIDTH - 20);
-      if (y > 20) y = 20; if (y < -(height - MINI_HEIGHT - 120)) y = -(height - MINI_HEIGHT - 120);
+      if (x > 10) x = 10; if (x < -(PORTRAIT_WIDTH - MINI_WIDTH - 20)) x = -(PORTRAIT_WIDTH - MINI_WIDTH - 20);
+      if (y > 20) y = 20; if (y < -(Dimensions.get('window').height - MINI_HEIGHT - 120)) y = -(Dimensions.get('window').height - MINI_HEIGHT - 120);
       Animated.spring(pan, { toValue: { x, y }, friction: 6, useNativeDriver: false }).start();
     }
   })).current;
 
+  useEffect(() => {
+    const interval = setInterval(async () => {
+        if (!isSlidingRef.current && player) {
+            setCurrentTime(player.currentTime);
+            setDuration(player.duration > 0 ? player.duration : 1);
+        }
+
+        if (streamMode === 'separate') {
+            const audioStatus = await syncAudioRef.current.getStatusAsync();
+            if (audioStatus.isLoaded) {
+                if (player.playing) {
+                    const diff = Math.abs((player.currentTime * 1000) - audioStatus.positionMillis);
+                    if (diff > 500) await syncAudioRef.current.setPositionAsync(player.currentTime * 1000);
+                    if (!audioStatus.isPlaying) await syncAudioRef.current.playAsync();
+                } else {
+                    if (audioStatus.isPlaying) await syncAudioRef.current.pauseAsync().catch(()=>{});
+                }
+            }
+        }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [player, streamMode]);
+
+  const closePlayer = async () => {
+      setPlayerState('hidden');
+      if (isFullscreen) await toggleFullscreen();
+      setStreamUrl(null);
+      if (player) player.pause();
+      await syncAudioRef.current.unloadAsync().catch(()=>{});
+  };
+
+  const formatTime = (timeInSeconds) => {
+      if (isNaN(timeInSeconds)) return "00:00";
+      const m = Math.floor(timeInSeconds / 60);
+      const s = Math.floor(timeInSeconds % 60);
+      return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
   if (playerState === 'hidden') return null;
-  const isFull = playerState === 'full';
-  const isCurrentlyMuxed = checkIsMuxed();
-  const shouldVideoPlay = isPlaying && (!isAudioMode || isCurrentlyMuxed);
-  const hideVideo = isAudioMode && !isLocalRef.current;
-  const showCustomPoster = isAudioMode && !isLocalRef.current;
+  const isInteractiveFull = playerState === 'full' || playerState === 'center' || playerState === 'fullscreen';
 
   return (
-     <Animated.View 
-        style={[isFull ? styles.fullContainer : [styles.miniContainer, { transform: [{ translateX: pan.x }, { translateY: pan.y }] }]]} 
-        {...(isFull ? {} : panResponder.panHandlers)}
-     >
-        <TouchableOpacity activeOpacity={0.9} style={styles.touchable} onPress={() => { if (!isFull && videoData) navigation.navigate('Player', { videoId: videoData.id, videoData }); }}>
-           <View style={isFull ? styles.fullVideoWrapper : styles.miniVideoWrapper}>
+    <Animated.View 
+        style={[
+            playerState === 'fullscreen' ? styles.fullscreenContainer : 
+            playerState === 'full' ? styles.fullContainer : 
+            playerState === 'center' ? styles.centerContainer : 
+            styles.miniContainer, 
+            playerState === 'mini' && { transform: pan.getTranslateTransform() }
+        ]} 
+        {...(!isInteractiveFull ? miniPanResponder.panHandlers : {})}
+    >
+      <View style={styles.videoWrapper}>
+        
+        {/* 🚨 [পরিবর্তিত] ভিডিওটি আগের মতোই থাকবে, শুধু অডিও মোডে একটি কালো পর্দা পড়বে 🚨 */}
+        {streamUrl && !fallbackData && (
+          <View style={{ flex: 1, width: '100%', height: '100%' }}>
+            
+            <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
+                <VideoView 
+                  ref={videoViewRef} 
+                  player={player} 
+                  style={styles.video} 
+                  contentFit="contain"
+                  nativeControls={false} 
+                />
+            </Animated.View>
 
-               {errorMsg ? (
-                  <View style={styles.loadingBox}>
-                      <Ionicons name="warning-outline" size={isFull ? 40 : 24} color="#FF4444" />
-                      <Text style={{color: '#FF4444', marginTop: 10, fontSize: isFull ? 16 : 12, textAlign: 'center', paddingHorizontal: 10}}>
-                          {errorMsg}
-                      </Text>
-                  </View>
-               ) : streamUrl ? (
-                  <View style={[styles.videoCoreWrapper, hideVideo && styles.hiddenVideoStyle]}>
-                    <Video 
-                      key={videoKey}
-                      ref={videoRef}
-                      source={{ uri: streamUrl }}
-                      style={styles.video}
-                      paused={!shouldVideoPlay}  // [NEW]: react-native-video এর জন্য shouldPlay এর বদলে paused
-                      muted={streamMode === 'separate'}
-                      controls={isFull && (!isAudioMode || isLocalRef.current)}
-                      resizeMode={isFull ? "contain" : "cover"}
-                      onProgress={handleProgress} // [NEW]: সিঙ্ক করার ইভেন্ট
-                      onLoad={(meta) => {
-                         if (seekPosRef.current > 0) {
-                             videoRef.current.seek(seekPosRef.current / 1000);
-                             seekPosRef.current = 0;
-                         }
-                      }}
-                    />
-                  </View>
-               ) : (
-                  <View style={styles.loadingBox}><ActivityIndicator size={isFull ? "large" : "small"} color="#FF0000" /></View>
-               )}
+            {/* 🚨 শুধু অডিও মোড অন থাকলে ভিডিওর ওপরে এই কালো পর্দাটি ভেসে উঠবে (zIndex: 10) 🚨 */}
+            {isAudioMode && (
+                <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', zIndex: 10 }]}>
+                    <Ionicons name="musical-notes" size={60} color="#00BFA5" />
+                    <Text style={{ color: '#00BFA5', marginTop: 10, fontSize: 16, fontWeight: 'bold' }}>
+                        অডিও মোড চলছে (ভিডিও লুকানো আছে)
+                    </Text>
+                </View>
+            )}
 
-               {isSwitching && (
-                  <View style={styles.switchingOverlay}>
-                    <ActivityIndicator size="large" color="#00BFA5" />
-                  </View>
-               )}
+          </View>
+        )}
 
-               {showCustomPoster && (
-                  <View style={styles.audioPosterContainer}>
-                    <Image source={{ uri: videoData?.thumbnail }} style={styles.audioPosterBg} blurRadius={isFull ? 15 : 5} />
-                    <View style={styles.audioPosterOverlay}>
-                      <View style={[styles.audioIconCircle, !isFull && { width: 40, height: 40, borderRadius: 20 }]}>
-                        <Ionicons name="musical-notes" size={isFull ? 50 : 20} color="#FFF" />
-                      </View>
-                      {isFull && <Text style={styles.audioPosterText}>ব্যাকগ্রাউন্ড অডিও প্লে হচ্ছে</Text>}
-                    </View>
-                  </View>
-               )}
+        {isInteractiveFull && !fallbackData && (
+            <View style={styles.tapOverlay} {...videoPanResponder.panHandlers}>
+                <TouchableWithoutFeedback onPress={() => handleTap('left')}><View style={styles.tapHalf} /></TouchableWithoutFeedback>
+                <TouchableWithoutFeedback onPress={() => handleTap('right')}><View style={styles.tapHalf} /></TouchableWithoutFeedback>
+            </View>
+        )}
 
-               {!isFull && (
-                  <View style={[styles.overlay, isAudioMode ? {zIndex: 20} : {}]}>
-                     <TouchableOpacity style={styles.miniPlayBtn} onPress={async () => {
-                         if (isAudioMode && !isCurrentlyMuxed && audioRef.current) {
-                             const status = await audioRef.current.getStatusAsync();
-                             if (status?.isPlaying) { await audioRef.current.pauseAsync(); setIsPlaying(false); } 
-                             else { await audioRef.current.playAsync(); setIsPlaying(true); }
-                         } else {
-                             setIsPlaying(!isPlaying);
-                         }
-                     }}>
-                        <Ionicons name={isPlaying ? "pause" : "play"} size={26} color="#FFF" />
-                     </TouchableOpacity>
-                     <TouchableOpacity style={styles.miniCloseBtn} onPress={async () => {
-                         await setBackgroundAudio(false); 
-                         if (audioRef.current) { try { await audioRef.current.unloadAsync(); audioRef.current = null; } catch(e){} }
-                         try { await syncAudioRef.current.unloadAsync(); } catch(e){}
-                         setPlayerState('hidden'); setVideoData(null); setStreamUrl(null); setAudioStreamUrl(null); pan.setValue({ x:0, y:0 });
-                     }}>
-                        <Ionicons name="close" size={24} color="#FFF" />
-                     </TouchableOpacity>
-                  </View>
-               )}
-           </View>
-        </TouchableOpacity>
-     </Animated.View>
+        {isInteractiveFull && showControls && !fallbackData && (
+          <View style={styles.controls} pointerEvents="box-none">
+             
+             <View style={styles.topBar}>
+                 <TouchableOpacity style={styles.iconBtn} onPress={handleSmartBack}>
+                    <Ionicons name="chevron-down" size={35} color="#FFF" />
+                 </TouchableOpacity>
+                 <TouchableOpacity style={styles.iconBtn} onPress={() => setShowSettingsMenu(true)}>
+                    <Ionicons name="settings-outline" size={28} color="#FFF" />
+                 </TouchableOpacity>
+             </View>
+             
+             <View style={styles.centerRow} pointerEvents="box-none">
+                <TouchableOpacity onPress={async () => {
+                    if (player.playing) {
+                        player.pause();
+                        if (streamMode === 'separate') await syncAudioRef.current.pauseAsync().catch(()=>{});
+                    } else {
+                        player.play();
+                        if (streamMode === 'separate') await syncAudioRef.current.playAsync().catch(()=>{});
+                    }
+                    triggerControls();
+                }}>
+                   <Ionicons name={player.playing ? "pause-circle" : "play-circle"} size={75} color="#FFF" />
+                </TouchableOpacity>
+             </View>
+
+             <View style={styles.bottomBar}>
+                <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
+                
+                <Slider 
+                  style={{flex: 1, height: 40, marginHorizontal: 10}}
+                  minimumValue={0}
+                  maximumValue={duration}
+                  value={currentTime}
+                  onSlidingStart={() => {
+                      isSlidingRef.current = true; 
+                      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+                  }}
+                  onValueChange={(v) => setCurrentTime(v)} 
+                  onSlidingComplete={async (v) => {
+                      player.currentTime = v; 
+                      if (streamMode === 'separate') await syncAudioWithVideo(v);
+                      isSlidingRef.current = false; 
+                      triggerControls();
+                  }}
+                  minimumTrackTintColor="#FF0000"
+                  thumbTintColor="#FF0000"
+                />
+                <Text style={styles.timeText}>{formatTime(duration)}</Text>
+                
+                <TouchableOpacity style={{marginLeft: 15}} onPress={toggleFullscreen}>
+                    <Ionicons name={isFullscreen ? "contract" : "expand"} size={24} color="#FFF" />
+                </TouchableOpacity>
+             </View>
+          </View>
+        )}
+
+        <Modal visible={showSettingsMenu} transparent animationType="fade">
+            <TouchableOpacity style={styles.modalBackdrop} onPress={() => setShowSettingsMenu(false)}>
+                <TouchableOpacity activeOpacity={1} style={styles.settingsMenu}>
+                    <Text style={styles.modalTitle}>Player Settings</Text>
+                    
+                    <TouchableOpacity style={styles.menuItem} onPress={() => {
+                        setShowSettingsMenu(false);
+                        const ytUrl = `https://www.youtube.com/watch?v=${currentVideoIdRef.current}?app=desktop`; 
+                        
+                        Linking.openURL(`googlechrome://navigate?url=${ytUrl}`).catch(() => {
+                            WebBrowser.openBrowserAsync(ytUrl, {
+                                presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
+                            });
+                        });
+                    }}>
+                        <Ionicons name="globe-outline" size={20} color="#FFF" style={styles.menuIcon} />
+                        <Text style={styles.menuText}>Open in Browser</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity style={styles.menuItem} onPress={() => { setShowSettingsMenu(false); setShowSpeedMenu(true); }}>
+                        <Ionicons name="speedometer-outline" size={20} color="#FFF" style={styles.menuIcon} />
+                        <Text style={styles.menuText}>Playback Speed ({currentSpeed}x)</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity style={styles.menuItem} onPress={() => {
+                        setShowSettingsMenu(false);
+                        alert("Saved to Playlist successfully! (Feature coming to Playlist.js)");
+                    }}>
+                        <Ionicons name="add-circle-outline" size={20} color="#FFF" style={styles.menuIcon} />
+                        <Text style={styles.menuText}>Save to Playlist</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity style={styles.menuItem} onPress={() => {
+                        setShowSettingsMenu(false);
+                        Share.share({ message: `Watch this awesome video: https://www.youtube.com/watch?v=${currentVideoIdRef.current}` });
+                    }}>
+                        <Ionicons name="share-social-outline" size={20} color="#FFF" style={styles.menuIcon} />
+                        <Text style={styles.menuText}>Share</Text>
+                    </TouchableOpacity>
+                </TouchableOpacity>
+            </TouchableOpacity>
+        </Modal>
+
+        <Modal visible={showSpeedMenu} transparent animationType="fade">
+            <TouchableOpacity style={styles.modalBackdrop} onPress={() => setShowSpeedMenu(false)}>
+                <TouchableOpacity activeOpacity={1} style={styles.settingsMenu}>
+                    <Text style={styles.modalTitle}>Select Speed</Text>
+                    {[0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0].map(s => (
+                        <TouchableOpacity key={s} style={styles.menuItem} onPress={() => changeSpeed(s)}>
+                            <Text style={[styles.menuText, currentSpeed === s && {color: '#FF0000', fontWeight: 'bold'}]}>
+                                {s === 1.0 ? 'Normal (1.0x)' : `${s}x`}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </TouchableOpacity>
+            </TouchableOpacity>
+        </Modal>
+
+        {fallbackData && (
+          <View style={styles.fallbackOverlay}>
+            <Ionicons name="alert-circle" size={50} color="#FFD700" />
+            <Text style={styles.fallbackText}>{fallbackData.message}</Text>
+            <TouchableOpacity style={styles.btn} onPress={() => { startPlayback(fallbackData.data); setFallbackData(null); }}>
+              <Text style={styles.btnText}>OK, Play Highest Quality</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        
+        {!isInteractiveFull && (
+            <TouchableOpacity activeOpacity={0.9} style={styles.miniTouchableArea} onPress={() => {
+                if (videoData) {
+                    navigation.navigate('Player', { videoId: currentVideoIdRef.current, videoData });
+                    setPlayerState('full');
+                }
+            }}>
+                <TouchableOpacity onPress={closePlayer} style={styles.miniCloseBtn}>
+                    <Ionicons name="close-circle" size={28} color="#FFF" />
+                </TouchableOpacity>
+            </TouchableOpacity>
+        )}
+      </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  fullContainer: { position: 'absolute', top: 55, left: 0, width: width, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000' },
-  miniContainer: { position: 'absolute', bottom: 80, right: 15, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', zIndex: 9999, elevation: 15, borderRadius: 12, overflow: 'hidden' },
-  touchable: { flex: 1, width: '100%', height: '100%' },
-  fullVideoWrapper: { flex: 1, backgroundColor: '#000', width: '100%', height: '100%', position: 'relative' },
-  miniVideoWrapper: { flex: 1, width: '100%', height: '100%', backgroundColor: '#111', position: 'relative', borderRadius: 12, overflow: 'hidden' },
-  videoCoreWrapper: { flex: 1, width: '100%', height: '100%' },
-  hiddenVideoStyle: { position: 'absolute', opacity: 0, width: 1, height: 1, left: -9999 },
-  video: { width: '100%', height: '100%', backgroundColor: '#000' },
-  loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  switchingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-  audioPosterContainer: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
-  audioPosterBg: { ...StyleSheet.absoluteFillObject, opacity: 0.5 },
-  audioPosterOverlay: { alignItems: 'center', justifyContent: 'center' },
-  audioIconCircle: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(0,191,165,0.3)', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-  audioPosterText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-  overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, flexDirection: 'row', justifyContent: 'space-evenly', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)' },
-  miniPlayBtn: { padding: 10 },
-  miniCloseBtn: { padding: 10 },
+  fullscreenContainer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, backgroundColor: '#000', overflow: 'hidden' }, 
+  fullContainer: { position: 'absolute', top: 55, left: 0, width: PORTRAIT_WIDTH, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000', overflow: 'hidden' },
+  centerContainer: { position: 'absolute', top: 0, left: 0, width: PORTRAIT_WIDTH, height: PORTRAIT_HEIGHT, zIndex: 9999, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  miniContainer: { position: 'absolute', bottom: 100, right: 20, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', borderRadius: 15, overflow: 'hidden', elevation: 10, borderWidth: 1, borderColor: '#00FF00' },
+  
+  videoWrapper: { flex: 1, justifyContent: 'center', width: '100%', height: '100%' },
+  animatedVideoWrapper: { flex: 1, width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }, 
+  video: { flex: 1, width: '100%', height: '100%' },
+  
+  tapOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', zIndex: 5 }, 
+  tapHalf: { flex: 1 },
+  controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
+  
+  topBar: { position: 'absolute', top: 10, left: 10, right: 15, flexDirection: 'row', justifyContent: 'space-between', zIndex: 20 },
+  iconBtn: { padding: 5 },
+  
+  centerRow: { flexDirection: 'row', alignItems: 'center', zIndex: 20 },
+  bottomBar: { position: 'absolute', bottom: 5, width: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, zIndex: 20 },
+  timeText: { color: '#FFF', fontSize: 13, fontWeight: 'bold' },
+  
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
+  settingsMenu: { width: 250, backgroundColor: '#1A1A1A', borderRadius: 15, padding: 15, elevation: 10 },
+  modalTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 10, textAlign: 'center', borderBottomWidth: 1, borderBottomColor: '#333', paddingBottom: 10 },
+  menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#333' },
+  menuIcon: { marginRight: 10 },
+  menuText: { color: '#FFF', fontSize: 16 },
+
+  fallbackOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center', padding: 20, zIndex: 30 },
+  fallbackText: { color: '#FFF', textAlign: 'center', marginVertical: 20, fontSize: 16 },
+  btn: { backgroundColor: '#FF0000', paddingHorizontal: 25, paddingVertical: 12, borderRadius: 10 },
+  btnText: { color: '#FFF', fontWeight: 'bold' },
+  miniTouchableArea: { flex: 1, width: '100%', height: '100%', position: 'absolute', zIndex: 50 },
+  miniCloseBtn: { position: 'absolute', top: 5, right: 5, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 15 },
 });
