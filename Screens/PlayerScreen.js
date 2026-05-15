@@ -315,22 +315,19 @@ export default function PlayerScreen({ route, navigation }) {
       <Modal visible={showDownloadModal} transparent animationType="slide" onRequestClose={() => setShowDownloadModal(false)}>
         <View style={styles.modalOverlay}>
           
-          {/* বামদিকের খালি অংশ - এখানে ক্লিক করলে মডাল কেটে যাবে */}
           <TouchableOpacity 
               style={styles.modalBackdrop} 
               activeOpacity={1} 
               onPress={() => setShowDownloadModal(false)} 
           />
           
-          {/* ডানদিকের অর্ধেক স্কিনের প্যানেল */}
           <View style={styles.modalContent}>
             
             <View style={styles.modalDragIndicator} />
             
             <View style={styles.modalHeader}>
-              <View style={{ flex: 1 }}>
-                Text>
-              </View>
+              {/* কোনো টেক্সট বা ভুল স্পেস রাখা হয়নি যাতে ক্র্যাশ না করে */}
+              <View style={{ flex: 1 }} />
               <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setShowDownloadModal(false)}>
                 <Ionicons name="close" size={20} color="#FFF" />
               </TouchableOpacity>
@@ -443,24 +440,21 @@ const styles = StyleSheet.create({
     recMeta: { color: '#AAA', fontSize: 12, marginTop: 4 },
     recViewsInfo: { color: '#888', fontSize: 11, marginTop: 2 },
     
-    // ==========================================
-    // 2D Half-Screen Modal Styles
-    // ==========================================
     modalOverlay: { 
         flex: 1, 
         flexDirection: 'row', 
-        justifyContent: 'flex-end', // ডানদিকে অ্যালাইন করা
-        alignItems: 'flex-end'      // নিচে অ্যালাইন করা
+        justifyContent: 'flex-end', 
+        alignItems: 'flex-end'
     },
     modalBackdrop: { 
         ...StyleSheet.absoluteFillObject, 
-        backgroundColor: 'rgba(0,0,0,0.4)' // ট্রান্সপারেন্ট ব্ল্যাক, পেছনের অ্যাপ দেখা যাবে
+        backgroundColor: 'rgba(0,0,0,0.4)' 
     },
     modalContent: { 
-        width: '50%', // স্ক্রিনের ঠিক অর্ধেক সাইজ
+        width: '50%', 
         backgroundColor: '#1E1E1E', 
         borderTopLeftRadius: 25, 
-        borderTopRightRadius: 0, // ডানদিকে কোনো রাউন্ড থাকবে না, কারণ এটি সাইডে লাগানো
+        borderTopRightRadius: 0, 
         paddingHorizontal: 12, 
         paddingTop: 10, 
         paddingBottom: Platform.OS === 'ios' ? 40 : 20, 
@@ -475,14 +469,12 @@ const styles = StyleSheet.create({
     },
     modalDragIndicator: { width: 35, height: 4, backgroundColor: '#444', borderRadius: 2, alignSelf: 'center', marginBottom: 15 },
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 15 },
-    modalTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold' }, // সাইজ কমানো হয়েছে
-    modalSubtitle: { color: '#888', fontSize: 10, marginTop: 3 }, // সাইজ কমানো হয়েছে
     modalCloseBtn: { padding: 6, backgroundColor: '#2A2A2A', borderRadius: 15, marginLeft: 5 },
     
     tabContainer: { flexDirection: 'row', backgroundColor: '#111', borderRadius: 10, padding: 3, marginBottom: 15 },
     tabButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 8 },
     activeTabButton: { backgroundColor: '#2A2A2A' },
-    tabText: { color: '#888', fontSize: 12, fontWeight: 'bold', marginLeft: 6 }, // সাইজ কমানো হয়েছে
+    tabText: { color: '#888', fontSize: 12, fontWeight: 'bold', marginLeft: 6 }, 
     activeTabText: { color: '#FFF' },
 
     loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -496,7 +488,7 @@ const styles = StyleSheet.create({
     },
     qualityInfoLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
     qualityIconBg: { backgroundColor: 'rgba(0, 191, 165, 0.1)', padding: 8, borderRadius: 10 },
-    qualityText: { color: '#FFF', fontSize: 14, fontWeight: 'bold' }, // সাইজ কমানো হয়েছে
-    qualitySubText: { color: '#888', fontSize: 10, marginTop: 2 }, // সাইজ কমানো হয়েছে
+    qualityText: { color: '#FFF', fontSize: 14, fontWeight: 'bold' }, 
+    qualitySubText: { color: '#888', fontSize: 10, marginTop: 2 }, 
     downloadIconBtn: { padding: 5 }
 });
