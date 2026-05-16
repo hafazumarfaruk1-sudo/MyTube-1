@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { View, StyleSheet, Text, ActivityIndicator, TouchableOpacity, FlatList, Image, Dimensions, StatusBar } from 'react-native';
-//import { Video } from 'expo-av';
+import { Video } from 'expo-av'; // [FIXED]: কমেন্ট তুলে নেওয়া হলো যাতে ভিডিও প্লেয়ার ঠিকঠাক কাজ করে
 import { Ionicons } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
 
@@ -14,7 +14,7 @@ export default function PlaylistPage({ route, navigation }) {
   const [injectedJS, setInjectedJS] = useState(""); // গিটহাবের কোড এখানে লোড হবে
   const [recommendedVideos, setRecommendedVideos] = useState([]);
   const webViewRef = useRef(null);
-  
+
   const isAntiDataSaver = global.appQuality.isAntiDataSaver;
 
   useLayoutEffect(() => {
@@ -43,7 +43,11 @@ export default function PlaylistPage({ route, navigation }) {
   // ২. ভিডিও পরিবর্তন হলে সব রিসেট করা
   useEffect(() => {
     setVideoUrl(null);
-    setLoadingUrl(true);
+    if (!videoId) {
+      setLoadingUrl(false); // [FIXED]: আইডি না থাকলে লোডিং ফলস হবে যেন স্ক্রিন হ্যাং না হয়ে থাকে
+    } else {
+      setLoadingUrl(true);
+    }
     fetchRecommendations();
   }, [videoId]);
 
@@ -97,7 +101,7 @@ export default function PlaylistPage({ route, navigation }) {
   return (
     <View style={styles.singleContainer}>
       <StatusBar backgroundColor="#000" barStyle="light-content" />
-      
+
       <View style={styles.videoPlayerWrapper}>
         <TouchableOpacity style={styles.floatingBackBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="chevron-down" size={30} color="#FFF" />
@@ -119,10 +123,17 @@ export default function PlaylistPage({ route, navigation }) {
             resizeMode="contain" 
             shouldPlay 
           />
+        ) : !videoId ? (
+          // [FIXED]: ইউজার সরাসরি প্লেলিস্টে আসলে এই সুন্দর মেসেজটি শো করবে
+          <View style={styles.loadingContainer}>
+            <Ionicons name="play-circle-outline" size={50} color="#FF0000" />
+            <Text style={{color: '#FFF', marginTop: 10, fontSize: 14, fontWeight: 'bold'}}>কোনো ভিডিও প্লে করা হচ্ছে না</Text>
+            <Text style={{color: '#AAA', marginTop: 4, fontSize: 12}}>নিচের তালিকা থেকে যেকোনো ভিডিও সিলেক্ট করুন</Text>
+          </View>
         ) : null}
 
         {/* অদৃশ্য ইঞ্জিন: এটি গিটহাব থেকে ডাউনলোড হওয়া injectedJS ব্যবহার করে */}
-        {!videoUrl && injectedJS !== "" && (
+        {videoId && !videoUrl && injectedJS !== "" && (
           <View style={{ width: 0, height: 0, opacity: 0, position: 'absolute' }}>
             <WebView 
               ref={webViewRef}
@@ -155,9 +166,9 @@ export default function PlaylistPage({ route, navigation }) {
         )}
         ListHeaderComponent={() => (
           <View style={styles.detailsContainer}>
-            <Text style={styles.videoMainTitle}>{videoData.title || "Playlist Video"}</Text>
+            <Text style={styles.videoMainTitle}>{videoData.title || "My Playlist Videos"}</Text>
             <Text style={styles.videoMainMeta}>{videoData.views || ""} • Deciphered via Remote Engine</Text>
-            
+
             {/* অ্যাকশন বাটনসমূহ */}
             <View style={styles.actionRow}>
                <TouchableOpacity style={styles.actionBtn}>
@@ -184,7 +195,7 @@ const styles = StyleSheet.create({
   singleContainer: { flex: 1, backgroundColor: '#0F0F0F' },
   videoPlayerWrapper: { width: '100%', height: 230, backgroundColor: '#000', justifyContent: 'center' },
   singleVideo: { width: '100%', height: '100%' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   floatingBackBtn: { position: 'absolute', top: 10, left: 10, zIndex: 20, padding: 5, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20 },
   detailsContainer: { padding: 15, borderBottomWidth: 1, borderBottomColor: '#222' },
   videoMainTitle: { color: '#FFF', fontSize: 17, fontWeight: 'bold' },
