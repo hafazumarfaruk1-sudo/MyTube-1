@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { View, StyleSheet, Text, ActivityIndicator, TouchableOpacity, FlatList, Image, Dimensions, StatusBar } from 'react-native';
-import { Video } from 'expo-av'; // [FIXED]: কমেন্ট তুলে নেওয়া হলো যাতে ভিডিও প্লেয়ার ঠিকঠাক কাজ করে
+import { Video } from 'expo-av'; 
 import { Ionicons } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
 
@@ -15,7 +15,8 @@ export default function PlaylistPage({ route, navigation }) {
   const [recommendedVideos, setRecommendedVideos] = useState([]);
   const webViewRef = useRef(null);
 
-  const isAntiDataSaver = global.appQuality.isAntiDataSaver;
+  // [FIXED]: এখানে Optional Chaining (?.) এবং ডিফল্ট ভ্যালু (|| false) দেওয়া হয়েছে যাতে ক্র্যাশ না করে
+  const isAntiDataSaver = global.appQuality?.isAntiDataSaver || false;
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
@@ -27,7 +28,7 @@ export default function PlaylistPage({ route, navigation }) {
       try {
         const response = await fetch(REMOTE_ENGINE_URL);
         const script = await response.text();
-        if (script.length > 50) { // কোডটি সফলভাবে আসলে সেট করবে
+        if (script.length > 50) { 
           setInjectedJS(script);
           console.log("[System] Playlist Engine Loaded.");
         }
@@ -44,7 +45,7 @@ export default function PlaylistPage({ route, navigation }) {
   useEffect(() => {
     setVideoUrl(null);
     if (!videoId) {
-      setLoadingUrl(false); // [FIXED]: আইডি না থাকলে লোডিং ফলস হবে যেন স্ক্রিন হ্যাং না হয়ে থাকে
+      setLoadingUrl(false); // আইডি না থাকলে লোডিং ফলস হবে যেন স্ক্রিন হ্যাং না হয়ে থাকে
     } else {
       setLoadingUrl(true);
     }
@@ -124,7 +125,7 @@ export default function PlaylistPage({ route, navigation }) {
             shouldPlay 
           />
         ) : !videoId ? (
-          // [FIXED]: ইউজার সরাসরি প্লেলিস্টে আসলে এই সুন্দর মেসেজটি শো করবে
+          // ইউজার সরাসরি প্লেলিস্টে আসলে এই সুন্দর মেসেজটি শো করবে
           <View style={styles.loadingContainer}>
             <Ionicons name="play-circle-outline" size={50} color="#FF0000" />
             <Text style={{color: '#FFF', marginTop: 10, fontSize: 14, fontWeight: 'bold'}}>কোনো ভিডিও প্লে করা হচ্ছে না</Text>
