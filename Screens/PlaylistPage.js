@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useLayoutEffect } from 'react';
-import { View, StyleSheet, Text, TouchableOpacity, FlatList, Image, StatusBar } from 'react-native';
+import { View, StyleSheet, Text, TouchableOpacity, FlatList, Image, StatusBar, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage'; 
+
+// 🚨 হোম স্ক্রিনের মতো ডিভাইসের মাপ নেওয়া হলো 🚨
+const { width, height } = Dimensions.get('window');
 
 export default function PlaylistPage({ navigation }) {
   const [savedPlaylist, setSavedPlaylist] = useState([]); 
@@ -11,7 +14,6 @@ export default function PlaylistPage({ navigation }) {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
-  // প্লেলিস্ট লোড করার এবং রিয়েল-টাইম আপডেটের লজিক
   useEffect(() => {
     loadPlaylist();
     const sub = DeviceEventEmitter.addListener('playlistUpdated', loadPlaylist);
@@ -27,7 +29,6 @@ export default function PlaylistPage({ navigation }) {
     }
   };
 
-  // প্লেলিস্ট থেকে ভিডিও রিমুভ করার ফাংশন
   const removeVideo = async (id) => {
     try {
       const filtered = savedPlaylist.filter(v => v.id !== id);
@@ -38,26 +39,37 @@ export default function PlaylistPage({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <StatusBar backgroundColor="#0F0F0F" barStyle="light-content" />
+      {/* 🚨 হোম স্ক্রিনের মতো ট্রান্সপারেন্ট স্ট্যাটাস বার 🚨 */}
+      <StatusBar backgroundColor="transparent" barStyle="light-content" translucent={true} />
 
-      {/* 🚨 সিম্পল এবং সুন্দর হেডার 🚨 */}
+      {/* 🚨 হোম স্ক্রিনের হুবহু লোগো এবং সার্চ বার 🚨 */}
       <View style={styles.header}>
+        <View style={styles.logoContainer}>
+           <Ionicons name="logo-youtube" size={28} color="#FF0000" />
+           <Text style={styles.logoText}>MyTube</Text>
+        </View>
+        <TouchableOpacity style={styles.searchBar} activeOpacity={0.8} onPress={() => navigation.navigate('searchsettings')}>
+          <Text style={{ flex: 1, color: '#888', fontSize: 14 }}>সার্চ...</Text>
+          <Ionicons name="search" size={18} color="#AAA" />
+        </TouchableOpacity>
+      </View>
+
+      {/* 🚨 প্লেলিস্টের নিজস্ব টাইটেল বার 🚨 */}
+      <View style={styles.playlistTitleBar}>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={28} color="#FFF" />
+          <Ionicons name="arrow-back" size={24} color="#FFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>My Saved Playlist</Text>
         <Text style={styles.videoCount}>{savedPlaylist.length} Videos</Text>
       </View>
 
-      {/* 🚨 সেভ করা প্লেলিস্টের লিস্ট 🚨 */}
       <FlatList 
         data={savedPlaylist} 
         keyExtractor={(item, index) => item.id + index} 
-        contentContainerStyle={{ paddingBottom: 150 }} // গ্লোবাল প্লেয়ারের জন্য নিচে জায়গা রাখা হলো
+        contentContainerStyle={{ paddingBottom: 150 }} 
         renderItem={({item}) => (
           <TouchableOpacity 
             style={styles.recVideoCard} 
-            // 🚨 ক্লিক করলেই সরাসরি গ্লোবাল প্লেয়ারে প্লে হবে 🚨
             onPress={() => DeviceEventEmitter.emit('playVideo', { videoId: item.id, videoData: item })}
           >
             <Image source={{ uri: item.thumbnail }} style={styles.thumbnailImage} />
@@ -83,22 +95,42 @@ export default function PlaylistPage({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F0F0F' },
+  container: { 
+    flex: 1, 
+    backgroundColor: '#000000', 
+    // 🚨 হোম স্ক্রিনের মতো ওপর এবং নিচের প্যাডিং 🚨
+    paddingTop: height / 32,    
+    paddingBottom: height / 20  
+  },
   
-  header: {
+  // 🚨 হোম স্ক্রিনের হেডার স্টাইল 🚨
+  header: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    paddingHorizontal: 12, 
+    paddingVertical: 10, 
+    borderBottomWidth: 1, 
+    borderBottomColor: '#222', 
+    width: '100%', 
+    backgroundColor: '#0F0F0F' 
+  },
+  logoContainer: { flexDirection: 'row', alignItems: 'center', width: 105 },
+  logoText: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 4 },
+  searchBar: { flex: 1, flexDirection: 'row', backgroundColor: '#222', borderRadius: 20, marginHorizontal: 8, paddingHorizontal: 12, alignItems: 'center', height: 38 },
+
+  // প্লেলিস্টের নিজস্ব টাইটেল বার
+  playlistTitleBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 15,
-    paddingBottom: 15,
+    paddingVertical: 12,
     paddingHorizontal: 15,
     backgroundColor: '#1A1A1A',
     borderBottomWidth: 1,
     borderBottomColor: '#333',
-    elevation: 5
   },
   backBtn: { marginRight: 15 },
-  headerTitle: { color: '#FFF', fontSize: 20, fontWeight: 'bold', flex: 1 },
-  videoCount: { color: '#AAA', fontSize: 14, fontWeight: 'bold' },
+  headerTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', flex: 1 },
+  videoCount: { color: '#AAA', fontSize: 13, fontWeight: 'bold' },
 
   recVideoCard: { 
     flexDirection: 'row', 
