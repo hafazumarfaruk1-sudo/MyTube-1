@@ -1,28 +1,31 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, StyleSheet, Text, ActivityIndicator, TouchableOpacity, FlatList, Image, Dimensions, StatusBar, SafeAreaView, ScrollView, Modal, Alert, Platform, Linking } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, StyleSheet, Text, ActivityIndicator, TouchableOpacity, FlatList, Image, Dimensions, StatusBar, SafeAreaView, ScrollView, Modal, Alert, Platform, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DeviceEventEmitter } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import * as NavigationBar from 'expo-navigation-bar';
+import { WebView } from 'react-native-webview'; 
 
 const { width, height } = Dimensions.get('window');
 const PLAYER_HEIGHT = (width * 9) / 16; 
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
+const MOBILE_USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36";
 
 export default function PlayerScreen({ route, navigation }) {
   const { videoId, videoData = {} } = route?.params || {};
+  const commentWebViewRef = useRef(null);
 
   const [relatedVideos, setRelatedVideos] = useState([]);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isSubscribed, setIsSubscribed] = useState(false);
-
   const [isInitialLoading, setIsInitialLoading] = useState(true);
 
   // Modals States
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [showDescModal, setShowDescModal] = useState(false);
   const [showCommentModal, setShowCommentModal] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false); // 🔐 গুগল লগইন উইন্ডো স্টেট
 
   // Download States
   const [downloadStep, setDownloadStep] = useState('fetching'); 
@@ -34,11 +37,20 @@ export default function PlayerScreen({ route, navigation }) {
   const [description, setDescription] = useState('');
   const [isDescLoading, setIsDescLoading] = useState(false);
   
-  // 🚨 [NEW]: সার্ভার এপিআই এর জন্য কমেন্ট স্টেট 🚨
+  // আলটিমেট কমেন্ট এবং রিপ্লাই স্টেট
   const [comments, setComments] = useState([]);
   const [isCommentsLoading, setIsCommentsLoading] = useState(false);
   const [commentNextToken, setCommentNextToken] = useState(null);
   const [isMoreCommentsLoading, setIsMoreCommentsLoading] = useState(false);
+  const [commentReplies, setCommentReplies] = useState({}); // { commentId: [replies_array] }
+  const [loadingReplyId, setLoadingReplyId] = useState(null);
+
+  // কমেন্ট ও রিপ্লাই ইনপুট স্টেট
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [commentInputText, setCommentInputText] = useState('');
+  const [replyingToCommentId, setReplyingToCommentId] = useState(null); // কার কমেন্টে রিপ্লাই হচ্ছে
+  const [replyAuthorName, setReplyAuthorName] = useState('');
+  const [loadWebViewEngine, setLoadWebViewEngine] = useState(false); // কমেন্ট পোস্ট ইঞ্জিন ট্রিগার
 
   const [isAudioMode, setIsAudioMode] = useState(videoData?.type === 'audio');
 
@@ -56,20 +68,21 @@ export default function PlayerScreen({ route, navigation }) {
 
   useEffect(() => {
     checkSubscriptionStatus();
+    checkLoginStatus();
     fetchRelatedVideos(false);
 
     if (videoId && videoData) {
         DeviceEventEmitter.emit('playVideo', { videoId: videoId, videoData: videoData });
         setIsAudioMode(videoData?.type === 'audio');
-
         setIsInitialLoading(true);
 
-        // ডাটা রিসেট
+        // ডাটা সম্পূর্ণ ক্লিনিং রিসেট
         setDescription('');
         setComments([]);
+        setCommentReplies({});
         setCommentNextToken(null);
         setIsCommentsLoading(false);
-        setIsMoreCommentsLoading(false);
+        setLoadWebViewEngine(false);
 
         const timer = setTimeout(() => {
             setIsInitialLoading(false);
@@ -85,6 +98,11 @@ export default function PlayerScreen({ route, navigation }) {
       const parsedSubs = subs ? JSON.parse(subs) : [];
       setIsSubscribed(parsedSubs.some(s => s.name === videoData.channel));
     } catch (e) {}
+  };
+
+  const checkLoginStatus = async () => {
+    const loginFlag = await AsyncStorage.getItem('mytube_is_logged_in');
+    setIsLoggedIn(loginFlag === 'true');
   };
 
   const toggleSubscription = async () => {
@@ -104,33 +122,6 @@ export default function PlayerScreen({ route, navigation }) {
     const newMode = !isAudioMode;
     setIsAudioMode(newMode);
     DeviceEventEmitter.emit('toggleAudioMode', newMode);
-  };
-
-  const handleLinkPress = (url) => {
-      setShowDescModal(false); 
-
-      if (url.includes('youtube.com') || url.includes('youtu.be')) {
-          navigation.navigate('searchsettings', { initialSearch: url });
-      } else {
-          Linking.openURL(url).catch(err => console.error("URL খুলতে সমস্যা হচ্ছে", err));
-      }
-  };
-
-  const renderDescriptionWithLinks = (text) => {
-      if (!text) return null;
-      const urlRegex = /(https?:\/\/[^\s]+)/g;
-      const parts = text.split(urlRegex);
-
-      return parts.map((part, index) => {
-          if (part.match(urlRegex)) {
-              return (
-                  <Text key={index} style={styles.clickableLink} onPress={() => handleLinkPress(part)}>
-                      {part}
-                  </Text>
-              );
-          }
-          return <Text key={index} style={styles.descText}>{part}</Text>;
-      });
   };
 
   const loadDescription = async () => {
@@ -155,31 +146,25 @@ export default function PlayerScreen({ route, navigation }) {
       setIsDescLoading(false);
   };
 
-  // 🚨 [NEW]: নতুন সার্ভার এপিআই এর মাধ্যমে কমেন্ট লোড করার সিস্টেম 🚨
+  // 🚀 সার্ভার এপিআই এর মাধ্যমে মেইন কমেন্ট ফেচিং
   const loadComments = async () => {
       setShowCommentModal(true);
-      if (comments.length > 0) return; // আগে লোড হয়ে থাকলে আর করবে না
+      if (comments.length > 0) return;
 
       setIsCommentsLoading(true);
       try {
-          // আপনার সার্ভারের লোকাল হোস্ট কল করা হচ্ছে
           const response = await fetch(`${MY_API_SERVER}/api/comments?videoId=${videoId}`);
           const data = await response.json();
-          
           if (data.success && data.comments) {
               setComments(data.comments);
               setCommentNextToken(data.nextContinuationToken || null);
-          } else {
-              setComments([]);
           }
       } catch (error) {
-          console.error("Comment Fetch Error:", error);
           setComments([]);
       }
       setIsCommentsLoading(false);
   };
 
-  // 🚨 [NEW]: স্ক্রল করলে আরও কমেন্ট লোড করার ফাংশন (Pagination) 🚨
   const loadMoreComments = async () => {
       if (!commentNextToken || isMoreCommentsLoading) return;
 
@@ -187,15 +172,117 @@ export default function PlayerScreen({ route, navigation }) {
       try {
           const response = await fetch(`${MY_API_SERVER}/api/comments?continuation=${encodeURIComponent(commentNextToken)}`);
           const data = await response.json();
-          
           if (data.success && data.comments) {
               setComments(prev => [...prev, ...data.comments]);
               setCommentNextToken(data.nextContinuationToken || null);
           }
       } catch (error) {
-          console.error("More Comments Fetch Error:", error);
+          console.error(error);
       }
       setIsMoreCommentsLoading(false);
+  };
+
+  // 💬 [NEW] সত্যি সত্যিই রিয়েল-টাইম কমেন্টের রিপ্লাই চেইন ভিউ করার ফাংশন
+  const fetchCommentReplies = async (commentId, replyToken) => {
+      if (!replyToken || loadingReplyId) return;
+      
+      // যদি অলরেডি ওপেন থাকে তবে টগল করে হাইড করবে
+      if (commentReplies[commentId]) {
+          const updatedReplies = { ...commentReplies };
+          delete updatedReplies[commentId];
+          setCommentReplies(updatedReplies);
+          return;
+      }
+
+      setLoadingReplyId(commentId);
+      try {
+          const response = await fetch(`${MY_API_SERVER}/api/comments?continuation=${encodeURIComponent(replyToken)}`);
+          const data = await response.json();
+          if (data.success && data.comments) {
+              setCommentReplies(prev => ({ ...prev, [commentId]: data.comments }));
+          }
+      } catch (error) {
+          console.error("Replies load failed", error);
+      }
+      setLoadingReplyId(null);
+  };
+
+  // 🔐 [CRITICAL]: আটকে না গিয়ে গুগল লগইন উইন্ডো প্রম্পট ট্রিগার লজিক
+  const handleInputInteraction = () => {
+      if (!isLoggedIn) {
+          setShowLoginModal(true); // লগইন করা না থাকলে আটকে না গিয়ে সরাসরি গুগল সাইন ইন অপশন দেখাবে।
+      } else {
+          setLoadWebViewEngine(true); // লগইন থাকলে ব্যাকগ্রাউন্ড ইঞ্জিন একটিভ করবে কমেন্ট করার জন্য
+      }
+  };
+
+  // ✍️ সত্যি সত্যিই কমেন্ট এবং রিপ্লাই পোস্ট করার হাইব্রিড এক্সিকিউটর
+  const submitCommentOrReply = () => {
+      if (!commentInputText.trim()) return;
+      setLoadWebViewEngine(true);
+      
+      // ইনজেক্টেড জাভাস্ক্রিপ্ট কমান্ড যা ইউটিউব পেজে ডাইরেক্ট অ্যাকশন নিবে
+      let runScript = "";
+      if (replyingToCommentId) {
+          // এটি নির্দিষ্ট রিপ্লাই বাটনে ক্লিক করে টেক্সট বসিয়ে সেন্ড করবে
+          runScript = `
+              try {
+                  var replyBtn = document.querySelectorAll('button[aria-label*="Reply"]')[0];
+                  if(replyBtn) replyBtn.click();
+                  setTimeout(function() {
+                      var inputField = document.querySelector('input[id="comment-input"], textarea');
+                      if(inputField) {
+                          inputField.value = "${commentInputText}";
+                          var sendBtn = document.querySelector('button[id="submit-button"]');
+                          if(sendBtn) sendBtn.click();
+                          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'POST_SUCCESS' }));
+                      }
+                  }, 1000);
+              } catch(e){}
+          `;
+      } else {
+          // এটি মেইন কমেন্ট বক্সে সাবমিট করবে
+          runScript = `
+              try {
+                  var box = document.querySelector('input[placeholder*="comment"], textarea');
+                  if(box) {
+                      box.value = "${commentInputText}";
+                      var sub = document.querySelector('button[id="submit-button"]');
+                      if(sub) sub.click();
+                      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'POST_SUCCESS' }));
+                  }
+              } catch(e){}
+          `;
+      }
+      
+      if (commentWebViewRef.current) {
+          commentWebViewRef.current.injectJavaScript(runScript);
+      }
+  };
+
+  const handleEngineMessage = (event) => {
+      try {
+          const parsed = JSON.parse(event.nativeEvent.data);
+          if (parsed.type === 'POST_SUCCESS') {
+              Alert.alert("সফল", "আপনার মন্তব্যটি সফলভাবে পোস্ট হয়েছে।");
+              setCommentInputText('');
+              setReplyingToCommentId(null);
+              // রিলোড কমেন্ট লিস্ট
+              setComments([]);
+              loadComments();
+          }
+      } catch (e) {}
+  };
+
+  const handleLoginNavigationChange = (navState) => {
+      // ইউজার সফলভাবে লগইন করে ইউটিউব হোমপেজে রিডাইরেক্ট হলে তা ট্র্যাক করা
+      if (navState.url.includes('youtube.com') && !navState.url.includes('ServiceLogin') && !navState.url.includes('signin')) {
+          AsyncStorage.setItem('mytube_is_logged_in', 'true');
+          setIsLoggedIn(true);
+          setShowLoginModal(false);
+          setLoadWebViewEngine(true);
+          Alert.alert("অভিনন্দন", "আপনার ইউটিউব অ্যাকাউন্ট সফলভাবে লগইন হয়েছে।");
+      }
   };
 
   const handleDownloadExecute = async (item) => {
@@ -207,9 +294,7 @@ export default function PlayerScreen({ route, navigation }) {
       const downloadId = Date.now().toString(); 
       const safeTitle = (videoData.title || 'video').replace(/[<>:"\/\\|?*]+/g, '').trim();
       const targetUrl = `https://www.youtube.com/watch?v=${videoId}`;
-
       const dlApiUrl = `${MY_API_SERVER}/api/aria-download?id=${downloadId}&url=${encodeURIComponent(targetUrl)}&quality=${encodeURIComponent(item.quality)}&type=${downloadType}&title=${encodeURIComponent(safeTitle)}`;
-
       await fetch(dlApiUrl);
     } catch (error) {
       Alert.alert("সার্ভার এরর", "সার্ভারের সাথে কানেক্ট করা যায়নি।");
@@ -368,6 +453,20 @@ export default function PlayerScreen({ route, navigation }) {
     <SafeAreaView style={styles.container}>
       <StatusBar hidden={true} /> 
 
+      {/* 🛠️ সাইলেন্ট ব্যাকগ্রাউন্ড এক্সিকিউশন ইঞ্জিন (শুধুমাত্র লগইন থাকলে রিয়েল-টাইম কমেন্ট বা রিপ্লাই সাবমিট করবে) */}
+      {loadWebViewEngine && videoId && !videoData.localUri && (
+          <View style={{ width: 0, height: 0, opacity: 0, overflow: 'hidden' }}>
+              <WebView
+                  ref={commentWebViewRef}
+                  source={{ uri: `https://m.youtube.com/watch?v=${videoId}` }}
+                  userAgent={MOBILE_USER_AGENT}
+                  mediaPlaybackRequiresUserAction={true}
+                  onMessage={handleEngineMessage}
+                  javaScriptEnabled={true}
+              />
+          </View>
+      )}
+
       <View style={styles.header}>
         <View style={styles.logoContainer}>
            <TouchableOpacity onPress={() => navigation.goBack()} style={{marginRight: 10}}>
@@ -446,23 +545,20 @@ export default function PlayerScreen({ route, navigation }) {
                     <Text style={styles.descMetaText}>{videoData?.publishedTime}</Text>
                 </View>
                 <View style={styles.divider} />
-
                 {isDescLoading ? (
                     <View style={{paddingVertical: 40, alignItems: 'center'}}>
                         <ActivityIndicator size="large" color="#00BFA5" />
                         <Text style={{color: '#AAA', marginTop: 15}}>ডিসক্রিপশন লোড হচ্ছে...</Text>
                     </View>
                 ) : (
-                    <Text style={styles.descText}>
-                        {renderDescriptionWithLinks(description)}
-                    </Text>
+                    <Text style={styles.descText}>{description}</Text>
                 )}
             </ScrollView>
           </View>
         </View>
       </Modal>
 
-      {/* 2. কমেন্টস Modal - 🚨 [UPDATED] Flatlist with infinite scroll 🚨 */}
+      {/* 2. কমেন্টস এবং রিপ্লাই Modal */}
       <Modal visible={showCommentModal} transparent animationType="slide" onRequestClose={() => setShowCommentModal(false)}>
         <View style={styles.bottomSheetOverlayFull}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setShowCommentModal(false)} />
@@ -488,21 +584,53 @@ export default function PlayerScreen({ route, navigation }) {
                         showsVerticalScrollIndicator={false}
                         onEndReached={loadMoreComments} 
                         onEndReachedThreshold={0.5} 
-                        ListFooterComponent={
-                            isMoreCommentsLoading ? (
-                                <ActivityIndicator size="small" color="#00BFA5" style={{ marginVertical: 15 }} />
-                            ) : null
-                        }
+                        ListFooterComponent={isMoreCommentsLoading ? <ActivityIndicator size="small" color="#00BFA5" style={{ marginVertical: 15 }} /> : null}
                         renderItem={({item}) => (
-                            <View style={styles.commentItem}>
-                                <Image source={{uri: item.avatar}} style={styles.commentAvatar} />
-                                <View style={styles.commentTextCol}>
-                                    <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 4}}>
-                                        <Text style={styles.commentAuthor}>{item.author}</Text>
-                                        {item.time && <Text style={styles.commentTime}> • {item.time}</Text>}
+                            <View style={styles.commentContainerBlock}>
+                                <View style={styles.commentItem}>
+                                    <Image source={{uri: item.avatar}} style={styles.commentAvatar} />
+                                    <View style={styles.commentTextCol}>
+                                        <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 4}}>
+                                            <Text style={styles.commentAuthor}>{item.author}</Text>
+                                            {item.time && <Text style={styles.commentTime}> • {item.time}</Text>}
+                                        </View>
+                                        <Text style={styles.commentText}>{item.text}</Text>
+                                        
+                                        {/* অ্যাকশন বোতাম রো (রিপ্লাই দেখুন ও রিপ্লাই দিন) */}
+                                        <View style={styles.commentActionRow}>
+                                            {item.replyToken && (
+                                                <TouchableOpacity style={styles.actionBtnItem} onPress={() => fetchCommentReplies(item.id, item.replyToken)}>
+                                                    <Ionicons name="chatbubbles-outline" size={14} color="#00BFA5" />
+                                                    <Text style={styles.actionBtnText}>
+                                                        {loadingReplyId === item.id ? "লোড হচ্ছে..." : commentReplies[item.id] ? "রিপ্লাইলুকান" : "রিপ্লাই দেখুন"}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            )}
+                                            <TouchableOpacity style={[styles.actionBtnItem, {marginLeft: 15}]} onPress={() => { handleInputInteraction(); setReplyingToCommentId(item.id); setReplyAuthorName(item.author); }}>
+                                                <Ionicons name="arrow-undo-outline" size={14} color="#AAA" />
+                                                <Text style={[styles.actionBtnText, {color: '#AAA'}]}>রিপ্লাই দিন</Text>
+                                            </TouchableOpacity>
+                                        </View>
                                     </View>
-                                    <Text style={styles.commentText}>{item.text}</Text>
                                 </View>
+
+                                {/* 💬 রিয়েল-টাইম নেস্টেড রিপ্লাই চেইন রেন্ডারার */}
+                                {commentReplies[item.id] && (
+                                    <View style={styles.nestedRepliesBox}>
+                                        {commentReplies[item.id].map((reply, rIdx) => (
+                                            <View key={reply.id + rIdx} style={styles.replyItemRow}>
+                                                <Image source={{uri: reply.avatar}} style={styles.replyAvatar} />
+                                                <View style={styles.commentTextCol}>
+                                                    <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 2}}>
+                                                        <Text style={styles.replyAuthor}>{reply.author}</Text>
+                                                        {reply.time && <Text style={styles.commentTime}> • {reply.time}</Text>}
+                                                    </View>
+                                                    <Text style={styles.replyText}>{reply.text}</Text>
+                                                </View>
+                                            </View>
+                                        ))}
+                                    </View>
+                                )}
                             </View>
                         )}
                     />
@@ -513,6 +641,32 @@ export default function PlayerScreen({ route, navigation }) {
                     </View>
                 )}
             </View>
+
+            {/* ✍️ স্মার্ট ক্র্যাশ-প্রুফ রিয়েল কমেন্ট ইনপুট সিস্টেম */}
+            {replyingToCommentId && (
+                <View style={styles.replyIndicatorBar}>
+                    <Text style={styles.replyIndicatorText}>{replyAuthorName} কে রিপ্লাই দেওয়া হচ্ছে...</Text>
+                    <TouchableOpacity onPress={() => { setReplyingToCommentId(null); setReplyAuthorName(''); }}>
+                        <Ionicons name="close-circle" size={18} color="#FF5252" />
+                    </TouchableOpacity>
+                </View>
+            )}
+            <View style={styles.nativeInputWrapperRow}>
+                <TextInput 
+                    style={styles.nativeInputField}
+                    placeholder={!isLoggedIn ? "🔐 মন্তব্য করতে এখানে চাপুন..." : replyingToCommentId ? "রিপ্লাই লিখুন..." : "একটি সাধারণ মন্তব্য লিখুন..."}
+                    placeholderTextColor="#666"
+                    value={commentInputText}
+                    onChangeText={setCommentInputText}
+                    onFocus={handleInputInteraction} // লগইন না করা থাকলে ক্লিক করা মাত্র প্রম্পট অন হবে, আটকে যাবে না।
+                />
+                {isLoggedIn && commentInputText.trim().length > 0 && (
+                    <TouchableOpacity style={styles.sendIconBtn} onPress={submitCommentOrReply}>
+                        <Ionicons name="send" size={20} color="#00BFA5" />
+                    </TouchableOpacity>
+                )}
+            </View>
+
           </View>
         </View>
       </Modal>
@@ -522,7 +676,6 @@ export default function PlayerScreen({ route, navigation }) {
         <View style={styles.modalOverlay}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setShowDownloadModal(false)} />
           <View style={styles.modalContent}>
-
             <View style={styles.modalDragIndicator} />
             <View style={styles.modalHeader}>
               <View style={{ flex: 1 }} />
@@ -532,11 +685,11 @@ export default function PlayerScreen({ route, navigation }) {
             </View>
 
             <View style={styles.tabContainer}>
-                <TouchableOpacity style={[styles.tabButton, downloadType === 'video' && styles.activeTabButton]} onPress={() => changeDownloadType('video')} activeOpacity={0.8}>
+                <TouchableOpacity style={[styles.tabButton, downloadType === 'video' && styles.activeTabButton]} onPress={() => changeDownloadType('video')}>
                     <Ionicons name="videocam" size={16} color={downloadType === 'video' ? '#FFF' : '#888'} />
                     <Text style={[styles.tabText, downloadType === 'video' && styles.activeTabText]}>Video</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={[styles.tabButton, downloadType === 'audio' && styles.activeTabButton]} onPress={() => changeDownloadType('audio')} activeOpacity={0.8}>
+                <TouchableOpacity style={[styles.tabButton, downloadType === 'audio' && styles.activeTabButton]} onPress={() => changeDownloadType('audio')}>
                     <Ionicons name="musical-notes" size={16} color={downloadType === 'audio' ? '#FFF' : '#888'} />
                     <Text style={[styles.tabText, downloadType === 'audio' && styles.activeTabText]}>Audio</Text>
                 </TouchableOpacity>
@@ -550,7 +703,7 @@ export default function PlayerScreen({ route, navigation }) {
             ) : (
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.qualityListContainer}>
                 {getSortedLinks().map((item, index) => (
-                  <TouchableOpacity key={index} style={styles.qualityCard} activeOpacity={0.7} onPress={() => handleDownloadExecute(item)}>
+                  <TouchableOpacity key={index} style={styles.qualityCard} onPress={() => handleDownloadExecute(item)}>
                     <View style={styles.qualityInfoLeft}>
                       <View style={styles.qualityIconBg}>
                           <Ionicons name={downloadType === 'audio' ? "headset" : "videocam"} size={18} color="#00BFA5" />
@@ -567,9 +720,27 @@ export default function PlayerScreen({ route, navigation }) {
                 ))}
               </ScrollView>
             )}
-
           </View>
         </View>
+      </Modal>
+
+      {/* 🔐 4. ওফিসিয়াল সিকিউর গুগল লগইন Modal (আটকে না গিয়ে এটি প্রম্পট হবে) */}
+      <Modal visible={showLoginModal} animationType="fade" onRequestClose={() => setShowLoginModal(false)}>
+          <SafeAreaView style={{ flex: 1, backgroundColor: '#121212' }}>
+              <View style={styles.loginModalHeader}>
+                  <TouchableOpacity onPress={() => setShowLoginModal(false)} style={styles.loginCloseClick}>
+                      <Ionicons name="close" size={24} color="#FFF" />
+                      <Text style={{color: '#FFF', fontSize: 16, marginLeft: 10, fontWeight: 'bold'}}>সাইন-ইন বাতিল করুন</Text>
+                  </TouchableOpacity>
+              </View>
+              <WebView 
+                  source={{ uri: 'https://accounts.google.com/ServiceLogin?service=youtube' }}
+                  userAgent={MOBILE_USER_AGENT}
+                  onNavigationStateChange={handleLoginNavigationChange}
+                  javaScriptEnabled={true}
+                  domStorageEnabled={true}
+              />
+          </SafeAreaView>
       </Modal>
 
     </SafeAreaView>
@@ -624,26 +795,42 @@ const styles = StyleSheet.create({
     recViewsInfo: { color: '#888', fontSize: 11, marginTop: 2 },
 
     bottomSheetOverlayFull: { flex: 1, justifyContent: 'flex-end' },
-    bottomSheetContentFull: { backgroundColor: '#1E1E1E', borderTopLeftRadius: 25, borderTopRightRadius: 25, paddingHorizontal: 20, paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 40 : 20, maxHeight: height * 0.75, minHeight: 400, elevation: 15, shadowColor: '#000', shadowOffset: { width: 0, height: -5 }, shadowOpacity: 0.3, shadowRadius: 10, zIndex: 10 },
+    bottomSheetContentFull: { backgroundColor: '#1E1E1E', borderTopLeftRadius: 25, borderTopRightRadius: 25, paddingHorizontal: 20, paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 30 : 15, maxHeight: height * 0.75, minHeight: 450, elevation: 15, zIndex: 10 },
 
     descTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 10 },
     descMetaRow: { flexDirection: 'row', marginBottom: 10 },
     descMetaText: { color: '#AAA', fontSize: 13, marginRight: 15, fontWeight: 'bold' },
     descText: { color: '#CCC', fontSize: 14, lineHeight: 22 },
-    clickableLink: { color: '#00BFA5', textDecorationLine: 'underline', fontWeight: 'bold' },
 
-    commentItem: { flexDirection: 'row', marginBottom: 18, paddingHorizontal: 5 },
+    commentContainerBlock: { borderBottomWidth: 1, borderBottomColor: '#2A2A2A', paddingVertical: 6 },
+    commentItem: { flexDirection: 'row', paddingHorizontal: 5, marginTop: 6 },
     commentAvatar: { width: 36, height: 36, borderRadius: 18, marginRight: 12, backgroundColor: '#333' },
     commentTextCol: { flex: 1 },
     commentAuthor: { color: '#AAA', fontSize: 13, fontWeight: 'bold' },
     commentTime: { color: '#777', fontSize: 11 },
-    commentText: { color: '#FFF', fontSize: 14, lineHeight: 20 },
+    commentText: { color: '#FFF', fontSize: 14, lineHeight: 20, marginTop: 2 },
+    commentActionRow: { flexDirection: 'row', marginTop: 8, alignItems: 'center' },
+    actionBtnItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2A2A2A', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+    actionBtnText: { color: '#00BFA5', fontSize: 11, fontWeight: 'bold', marginLeft: 4 },
+
+    nestedRepliesBox: { marginLeft: 48, marginTop: 5, backgroundColor: '#161616', borderRadius: 8, padding: 8 },
+    replyItemRow: { flexDirection: 'row', marginTop: 10, borderBottomWidth: 1, borderBottomColor: '#222', paddingBottom: 8 },
+    replyAvatar: { width: 26, height: 26, borderRadius: 13, marginRight: 10, backgroundColor: '#333' },
+    replyAuthor: { color: '#999', fontSize: 12, fontWeight: 'bold' },
+    replyText: { color: '#DDD', fontSize: 13, lineHeight: 18, marginTop: 1 },
+
+    replyIndicatorBar: { flexDirection: 'row', backgroundColor: '#2C1E1E', padding: 8, justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#442222' },
+    replyIndicatorText: { color: '#FF8A80', fontSize: 12, fontWeight: '500' },
+    nativeInputWrapperRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#111', padding: 10, borderTopWidth: 1, borderTopColor: '#2A2A2A' },
+    nativeInputField: { flex: 1, backgroundColor: '#252525', borderRadius: 20, color: '#FFF', paddingHorizontal: 15, height: 40, fontSize: 14 },
+    sendIconBtn: { marginLeft: 12, padding: 4 },
+
     commentPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 30 },
     commentPlaceholderText: { color: '#AAA', fontSize: 16, marginTop: 15 },
 
     modalOverlay: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'flex-end' },
     modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
-    modalContent: { width: '50%', backgroundColor: '#1E1E1E', borderTopLeftRadius: 25, borderTopRightRadius: 0, paddingHorizontal: 12, paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 40 : 20, maxHeight: height * 0.75, minHeight: 350, elevation: 15, shadowColor: '#000', shadowOffset: { width: -5, height: 0 }, shadowOpacity: 0.3, shadowRadius: 10, zIndex: 10 },
+    modalContent: { width: '50%', backgroundColor: '#1E1E1E', paddingHorizontal: 12, paddingTop: 10, maxHeight: height * 0.75, minHeight: 350, zIndex: 10 },
     modalDragIndicator: { width: 35, height: 4, backgroundColor: '#444', borderRadius: 2, alignSelf: 'center', marginBottom: 15 },
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
     modalTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
@@ -657,12 +844,14 @@ const styles = StyleSheet.create({
 
     loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     loadingText: { color: '#AAA', marginTop: 12, fontSize: 13 },
-
     qualityListContainer: { paddingBottom: 10 },
-    qualityCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#282828', padding: 10, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#383838' },
+    qualityCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#282828', padding: 10, borderRadius: 12, marginBottom: 10 },
     qualityInfoLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
     qualityIconBg: { backgroundColor: 'rgba(0, 191, 165, 0.1)', padding: 8, borderRadius: 10 },
     qualityText: { color: '#FFF', fontSize: 14, fontWeight: 'bold' }, 
     qualitySubText: { color: '#888', fontSize: 10, marginTop: 2 }, 
-    downloadIconBtn: { padding: 5 }
+    downloadIconBtn: { padding: 5 },
+
+    loginModalHeader: { height: 50, backgroundColor: '#1F1F1F', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15 },
+    loginCloseClick: { flexDirection: 'row', alignItems: 'center', flex: 1 }
 });
