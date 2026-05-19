@@ -15,12 +15,12 @@ export default function SearchSettingScreen() {
   const [query, setQuery] = useState('');
   const [history, setHistory] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
-  
+
   const [showResults, setShowResults] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [searchResults, setSearchResults] = useState([]);
-  
+
   const [continuationToken, setContinuationToken] = useState(null);
   const [apiKey, setApiKey] = useState(null);
 
@@ -45,7 +45,7 @@ export default function SearchSettingScreen() {
   const handleTextChange = async (text) => {
     setQuery(text);
     if (showResults) setShowResults(false);
-    
+
     if (text.trim().length > 0) {
       try {
         const res = await fetch(`http://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=${encodeURIComponent(text)}`);
@@ -74,19 +74,35 @@ export default function SearchSettingScreen() {
     inputRef.current?.blur();
     Keyboard.dismiss();
 
-    const ytLinkMatch = text.match(/(?:youtu\.be\/|youtube\.com\/(?:.*v=|.*\/|.*embed\/))([^&?\s]{11})/);
-    if (ytLinkMatch && ytLinkMatch[1]) {
-      const videoId = ytLinkMatch[1];
-      navigation.navigate('Player', { videoId: videoId, videoData: { id: videoId, title: 'Playing from Link...' } });
-      return;
-    }
-
     saveHistory(text.trim());
     setQuery(text.trim());
     setSuggestions([]);
     setShowResults(true);
+
+    // ইউটিউব লিংক চেক করা হচ্ছে
+    const ytLinkMatch = text.match(/(?:youtu\.be\/|youtube\.com\/(?:.*v=|.*\/|.*embed\/))([^&?\s]{11})/);
     
-    // সার্চ অপটিমাইজেশন: কিবোর্ড নামার পর ডাটা ফেচ হবে
+    if (ytLinkMatch && ytLinkMatch[1]) {
+      const videoId = ytLinkMatch[1];
+      
+      // লিংক পাওয়া গেলে সরাসরি প্লে না করে, একটি ভিডিও অবজেক্ট তৈরি করে লিস্টে দেখানো হচ্ছে
+      const videoFromLink = {
+        type: 'video',
+        id: videoId,
+        title: 'Video from Link', // ভিডিওর আসল নাম ফেচ করা সময়সাপেক্ষ, তাই আপাতত এটি দেখানো হচ্ছে
+        channel: 'YouTube Video',
+        views: 'Click to play',
+        publishedTime: '',
+        thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`, // ইউটিউবের ডিফল্ট হাই-কোয়ালিটি থাম্বনেইল
+        avatar: 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg'
+      };
+
+      setSearchResults([videoFromLink]); // সার্চ রেজাল্টে শুধু এই ভিডিওটি দেখানো হবে
+      setIsSearching(false);
+      return;
+    }
+
+    // যদি লিংক না হয়, তবে সাধারণ সার্চ অপটিমাইজেশন কাজ করবে
     InteractionManager.runAfterInteractions(() => {
       fetchSearchResults(text.trim());
     });
@@ -98,7 +114,7 @@ export default function SearchSettingScreen() {
     try {
       const response = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
       const htmlText = await response.text();
-      
+
       const apiMatch = htmlText.match(/"INNERTUBE_API_KEY":"(.*?)"/);
       if (apiMatch && apiMatch[1]) setApiKey(apiMatch[1]);
 
@@ -127,7 +143,7 @@ export default function SearchSettingScreen() {
       });
       const data = await response.json();
       const { finalFeed, nextToken } = processYouTubeData(data);
-      
+
       setSearchResults(prev => [...prev, ...finalFeed]);
       setContinuationToken(nextToken);
     } catch (e) {} finally { setIsLoadingMore(false); }
@@ -142,7 +158,7 @@ export default function SearchSettingScreen() {
     const extractNodes = (node) => {
       if (Array.isArray(node)) node.forEach(extractNodes);
       else if (node && typeof node === 'object') {
-        
+
         if (node.reelItemRenderer) {
           extractedShorts.push(node.reelItemRenderer);
         } else if (node.videoRenderer) {
@@ -169,7 +185,7 @@ export default function SearchSettingScreen() {
     extractNodes(jsonData);
 
     const finalFeed = [];
-    
+
     extractedChannels.forEach(ch => {
       const avatarUrl = ch.thumbnail?.thumbnails?.[ch.thumbnail.thumbnails.length - 1]?.url || ch.thumbnail?.thumbnails?.[0]?.url || 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg';
       const channelUrl = ch.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url || '';
@@ -196,7 +212,7 @@ export default function SearchSettingScreen() {
         });
       }
     });
-    
+
     const formattedShorts = Array.from(uniqueShortsMap.values()).slice(0, 15);
 
     if (formattedShorts.length > 0) {
@@ -219,7 +235,7 @@ export default function SearchSettingScreen() {
         });
       }
     });
-    
+
     finalFeed.push(...Array.from(uniqueVideosMap.values()));
     return { finalFeed, nextToken };
   };
@@ -313,12 +329,12 @@ export default function SearchSettingScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar backgroundColor="#0F0F0F" barStyle="light-content" translucent={true} />
-      
+
       <View style={styles.searchHeader}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn}>
           <Ionicons name="arrow-back" size={24} color="#FFF" />
         </TouchableOpacity>
-        
+
         <View style={styles.logoBox}>
           <Ionicons name="logo-youtube" size={22} color="#FF0000" />
           <Text style={styles.logoText}>MyTube</Text>
@@ -358,7 +374,7 @@ export default function SearchSettingScreen() {
                   <Ionicons name={query ? "search-outline" : "time-outline"} size={22} color="#AAA" />
                   <Text style={styles.historyText}>{item}</Text>
                 </TouchableOpacity>
-                
+
                 {!query && (
                   <TouchableOpacity style={styles.deleteBtn} onPress={() => removeHistoryItem(item)}>
                     <Ionicons name="close" size={22} color="#FFF" />
