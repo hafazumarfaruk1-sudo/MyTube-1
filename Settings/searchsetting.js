@@ -8,7 +8,6 @@ const { width, height } = Dimensions.get('window');
 const HEADER_HEIGHT = height / 12; 
 const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-// 🚨 [MODIFIED]: 'route' রিসিভ করা হচ্ছে 🚨
 export default function SearchSettingScreen({ route }) {
   const navigation = useNavigation();
   const inputRef = useRef(null);
@@ -42,7 +41,6 @@ export default function SearchSettingScreen({ route }) {
     }
   }, []);
 
-  // 🚨 [NEW]: PlayerScreen থেকে আসা লিংক অটোমেটিক সার্চ করার লজিক 🚨
   useEffect(() => {
     if (route?.params?.initialSearch) {
         const searchUrl = route.params.initialSearch;
@@ -140,6 +138,7 @@ export default function SearchSettingScreen({ route }) {
     } catch (e) {} finally { setIsLoadingMore(false); }
   };
 
+  // 🚨 [RESTORED]: শর্টস চেনার জন্য হারানো লজিকগুলো এখানে রিস্টোর করা হয়েছে 🚨
   const processYouTubeData = (jsonData) => {
     const extractedVideos = [];
     const extractedShorts = [];
@@ -152,13 +151,22 @@ export default function SearchSettingScreen({ route }) {
 
         if (node.reelItemRenderer) {
           extractedShorts.push(node.reelItemRenderer);
+        } else if (node.reelShelfRenderer) {
+          // ইউটিউব অনেক সময় শর্টসগুলো reelShelfRenderer এর ভেতর দেয়
+          node.reelShelfRenderer.items?.forEach(item => {
+             if (item.reelItemRenderer) extractedShorts.push(item.reelItemRenderer);
+          });
         } else if (node.videoRenderer) {
+          const channelName = node.videoRenderer.ownerText?.runs?.[0]?.text || '';
+          const titleText = node.videoRenderer.title?.runs?.[0]?.text?.toLowerCase() || '';
           const isShortBadge = node.videoRenderer.thumbnailOverlays?.some(overlay => overlay.thumbnailOverlayTimeStatusRenderer?.style === 'SHORTS');
-          if (isShortBadge || !node.videoRenderer.lengthText) {
+          
+          // শর্টস চেনার স্ট্রং লজিক
+          if (isShortBadge || !node.videoRenderer.lengthText || channelName.trim().startsWith('@') || titleText.includes('short') || titleText.includes('শর্ট')) {
              extractedShorts.push({
                 videoId: node.videoRenderer.videoId,
                 headline: { simpleText: node.videoRenderer.title?.runs?.[0]?.text },
-                viewCountText: { simpleText: node.videoRenderer.shortViewCountText?.simpleText || node.videoRenderer.viewCountText?.simpleText },
+                viewCountText: { simpleText: node.videoRenderer.shortViewCountText?.simpleText || node.videoRenderer.viewCountText?.simpleText || 'N/A' },
                 thumbnail: node.videoRenderer.thumbnail 
              });
           } else {
@@ -177,6 +185,7 @@ export default function SearchSettingScreen({ route }) {
 
     const finalFeed = [];
 
+    // প্রথমে চ্যানেলগুলো যুক্ত হবে
     extractedChannels.forEach(ch => {
       const avatarUrl = ch.thumbnail?.thumbnails?.[ch.thumbnail.thumbnails.length - 1]?.url || ch.thumbnail?.thumbnails?.[0]?.url || 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg';
       const channelUrl = ch.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url || '';
@@ -188,16 +197,19 @@ export default function SearchSettingScreen({ route }) {
       });
     });
 
+    // এরপর শর্টসগুলো যুক্ত হবে
     const uniqueShortsMap = new Map();
     extractedShorts.forEach(s => {
-      if (s.videoId && s.headline?.simpleText && !uniqueShortsMap.has(s.videoId)) {
-        let thumbUrl = `https://i.ytimg.com/vi/${s.videoId}/oardefault.jpg`;
+      const vidId = s.videoId;
+      const title = s.headline?.simpleText || s.title?.simpleText || 'Shorts';
+      if (vidId && title && !uniqueShortsMap.has(vidId)) {
+        let thumbUrl = `https://i.ytimg.com/vi/${vidId}/oardefault.jpg`;
         if (s.thumbnail?.thumbnails?.length > 0) {
             thumbUrl = s.thumbnail.thumbnails[0].url.split('?')[0]; 
         }
 
-        uniqueShortsMap.set(s.videoId, {
-          id: s.videoId, title: s.headline.simpleText, views: s.viewCountText?.simpleText || 'N/A',
+        uniqueShortsMap.set(vidId, {
+          id: vidId, title: title, views: s.viewCountText?.simpleText || 'N/A',
           thumbnail: thumbUrl,
           type: 'short'
         });
@@ -210,6 +222,7 @@ export default function SearchSettingScreen({ route }) {
       finalFeed.push({ type: 'shorts_shelf', id: 'shorts_' + Date.now(), shorts: formattedShorts });
     }
 
+    // সর্বশেষ ভিডিওগুলো যুক্ত হবে
     const uniqueVideosMap = new Map();
     extractedVideos.forEach(v => {
       if (v.videoId && !uniqueVideosMap.has(v.videoId)) {
