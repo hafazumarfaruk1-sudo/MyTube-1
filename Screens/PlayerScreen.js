@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, StyleSheet, Text, ActivityIndicator, TouchableOpacity, FlatList, Image, Dimensions, StatusBar, SafeAreaView, ScrollView, Modal, Alert, Platform } from 'react-native';
+import { View, StyleSheet, Text, ActivityIndicator, TouchableOpacity, FlatList, Image, Dimensions, StatusBar, SafeAreaView, ScrollView, Modal, Alert, Platform, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DeviceEventEmitter } from 'react-native';
@@ -30,7 +30,7 @@ export default function PlayerScreen({ route, navigation }) {
   const [downloadType, setDownloadType] = useState('video'); 
   const [isDownloading, setIsDownloading] = useState(false);
 
-  // New States for Live Description & Comments
+  // Live Description & Comments States
   const [description, setDescription] = useState('');
   const [isDescLoading, setIsDescLoading] = useState(false);
   const [comments, setComments] = useState([]);
@@ -59,7 +59,7 @@ export default function PlayerScreen({ route, navigation }) {
         setIsAudioMode(videoData?.type === 'audio');
 
         setIsInitialLoading(true);
-        // রিসেট ডাটা
+        // ডাটা রিসেট
         setDescription('');
         setComments([]);
 
@@ -99,21 +99,54 @@ export default function PlayerScreen({ route, navigation }) {
   };
 
   // ==========================================
-  // [NEW]: ওয়েব থেকে লাইভ ডিসক্রিপশন আনার লজিক
+  // [NEW]: ডিসক্রিপশনের লিংকে চাপ দিলে যা হবে
   // ==========================================
+  const handleLinkPress = (url) => {
+      setShowDescModal(false); // মডালটি আগে ক্লোজ করে দেওয়া হবে
+      
+      // যদি ইউটিউব লিংক হয় তবে অ্যাপ্লিকেশনে সার্চ হবে
+      if (url.includes('youtube.com') || url.includes('youtu.be')) {
+          // HomeScreen এর সার্চ লজিক ব্যবহার করে সার্চ করানো হচ্ছে
+          navigation.navigate('Home', { executeSearch: url });
+      } else {
+          // অন্যান্য সাধারণ লিংক হলে ব্রাউজারে ওপেন হবে
+          Linking.openURL(url).catch(err => console.error("URL খুলতে সমস্যা হচ্ছে", err));
+      }
+  };
+
+  // ডিসক্রিপশনের ভেতরের লিংক চেনার রেগুলার এক্সপ্রেশন
+  const renderDescriptionWithLinks = (text) => {
+      if (!text) return null;
+      const urlRegex = /(https?:\/\/[^\s]+)/g;
+      const parts = text.split(urlRegex);
+
+      return parts.map((part, index) => {
+          if (part.match(urlRegex)) {
+              return (
+                  <Text 
+                      key={index} 
+                      style={styles.clickableLink} 
+                      onPress={() => handleLinkPress(part)}
+                  >
+                      {part}
+                  </Text>
+              );
+          }
+          return <Text key={index} style={styles.descText}>{part}</Text>;
+      });
+  };
+
   const loadDescription = async () => {
       setShowDescModal(true);
-      if (description) return; // আগে লোড করা থাকলে আবার করবে না
+      if (description) return; 
       
       setIsDescLoading(true);
       try {
-          // সরাসরি ইউটিউব থেকে ডিসক্রিপশন স্ক্র্যাপ করে আনা
           const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`);
           const text = await response.text();
           const match = text.match(/"shortDescription":"(.*?)"/);
           
           if (match && match[1]) {
-              // ইউনিকোড ও নতুন লাইন ফিক্স করা
               let cleanDesc = match[1].replace(/\\n/g, '\n').replace(/\\u0026/g, '&').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
               setDescription(cleanDesc);
           } else {
@@ -126,36 +159,62 @@ export default function PlayerScreen({ route, navigation }) {
   };
 
   // ==========================================
-  // [NEW]: ওয়েব থেকে লাইভ কমেন্ট আনার লজিক
+  // [FIXED]: মাল্টিপল এপিআই দিয়ে কমেন্ট লোড করার লজিক
   // ==========================================
   const loadComments = async () => {
       setShowCommentModal(true);
-      if (comments.length > 0) return; // আগে লোড করা থাকলে আবার করবে না
+      if (comments.length > 0) return; 
       
       setIsCommentsLoading(true);
-      try {
-          // একটি ফ্রি ও ফাস্ট পাবলিক API এর মাধ্যমে কমেন্ট আনা হচ্ছে
-          const res = await fetch(`https://yt.lemnoslife.com/noKey/commentThreads?part=snippet&videoId=${videoId}&maxResults=30`);
-          const data = await res.json();
-          
-          if (data && data.items) {
-              const formatted = data.items.map(item => {
-                  const snip = item.snippet.topLevelComment.snippet;
-                  return {
-                      id: item.id,
-                      author: snip.authorDisplayName,
-                      avatar: snip.authorProfileImageUrl,
-                      text: snip.textOriginal,
-                      date: snip.publishedAt
-                  };
-              });
-              setComments(formatted);
-          } else {
-              setComments([]);
+      
+      // ৩টি আলাদা সার্ভারের লিস্ট (যাতে একটি নষ্ট হলে অন্যটি কাজ করে)
+      const apiEndpoints = [
+          `https://vid.puffyan.us/api/v1/comments/${videoId}`,
+          `https://invidious.nerdvpn.de/api/v1/comments/${videoId}`,
+          `https://yt.lemnoslife.com/noKey/commentThreads?part=snippet&videoId=${videoId}&maxResults=30`
+      ];
+
+      for (let url of apiEndpoints) {
+          try {
+              const res = await fetch(url);
+              const data = await res.json();
+              
+              // Invidious API ফরম্যাট চেক
+              if (data && data.comments && data.comments.length > 0) {
+                  const formatted = data.comments.map(item => ({
+                      id: item.commentId,
+                      author: item.author,
+                      avatar: item.authorThumbnails?.[0]?.url || `https://ui-avatars.com/api/?name=${encodeURIComponent(item.author)}&background=random`,
+                      text: item.content,
+                      date: item.publishedText
+                  }));
+                  setComments(formatted);
+                  setIsCommentsLoading(false);
+                  return; // সফল হলে লুপ থেকে বের হয়ে যাবে
+              } 
+              // LemnosLife API ফরম্যাট চেক
+              else if (data && data.items && data.items.length > 0) {
+                  const formatted = data.items.map(item => {
+                      const snip = item.snippet.topLevelComment.snippet;
+                      return {
+                          id: item.id,
+                          author: snip.authorDisplayName,
+                          avatar: snip.authorProfileImageUrl,
+                          text: snip.textOriginal,
+                          date: snip.publishedAt
+                      };
+                  });
+                  setComments(formatted);
+                  setIsCommentsLoading(false);
+                  return; // সফল হলে লুপ থেকে বের হয়ে যাবে
+              }
+          } catch (error) {
+              console.log("Comment API failed, trying next..."); // ফেইল করলে পরেরটা ট্রাই করবে
           }
-      } catch (error) {
-          setComments([]);
       }
+      
+      // কোনো এপিআই কাজ না করলে
+      setComments([]);
       setIsCommentsLoading(false);
   };
 
@@ -392,7 +451,7 @@ export default function PlayerScreen({ route, navigation }) {
       )}
 
       {/* ================================================== */}
-      {/* 1. ডিসক্রিপশন (Description) Modal */}
+      {/* 1. ডিসক্রিপশন Modal (Clickable Links) */}
       {/* ================================================== */}
       <Modal visible={showDescModal} transparent animationType="slide" onRequestClose={() => setShowDescModal(false)}>
         <View style={styles.bottomSheetOverlayFull}>
@@ -419,7 +478,9 @@ export default function PlayerScreen({ route, navigation }) {
                         <Text style={{color: '#AAA', marginTop: 15}}>ডিসক্রিপশন লোড হচ্ছে...</Text>
                     </View>
                 ) : (
-                    <Text style={styles.descText}>{description}</Text>
+                    <Text style={styles.descText}>
+                        {renderDescriptionWithLinks(description)}
+                    </Text>
                 )}
 
             </ScrollView>
@@ -428,7 +489,7 @@ export default function PlayerScreen({ route, navigation }) {
       </Modal>
 
       {/* ================================================== */}
-      {/* 2. কমেন্টস (Comments) Modal */}
+      {/* 2. কমেন্টস Modal */}
       {/* ================================================== */}
       <Modal visible={showCommentModal} transparent animationType="slide" onRequestClose={() => setShowCommentModal(false)}>
         <View style={styles.bottomSheetOverlayFull}>
@@ -451,7 +512,7 @@ export default function PlayerScreen({ route, navigation }) {
                 ) : comments.length > 0 ? (
                     <FlatList 
                         data={comments}
-                        keyExtractor={item => item.id}
+                        keyExtractor={(item, idx) => item.id + idx.toString()}
                         showsVerticalScrollIndicator={false}
                         renderItem={({item}) => (
                             <View style={styles.commentItem}>
@@ -585,13 +646,14 @@ const styles = StyleSheet.create({
     bottomSheetOverlayFull: { flex: 1, justifyContent: 'flex-end' },
     bottomSheetContentFull: { backgroundColor: '#1E1E1E', borderTopLeftRadius: 25, borderTopRightRadius: 25, paddingHorizontal: 20, paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 40 : 20, maxHeight: height * 0.75, minHeight: 400, elevation: 15, shadowColor: '#000', shadowOffset: { width: 0, height: -5 }, shadowOpacity: 0.3, shadowRadius: 10, zIndex: 10 },
     
-    // Description Styles
     descTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 10 },
     descMetaRow: { flexDirection: 'row', marginBottom: 10 },
     descMetaText: { color: '#AAA', fontSize: 13, marginRight: 15, fontWeight: 'bold' },
     descText: { color: '#CCC', fontSize: 14, lineHeight: 22 },
+    
+    // নতুন ক্লিকেবল লিংকের স্টাইল
+    clickableLink: { color: '#00BFA5', textDecorationLine: 'underline', fontWeight: 'bold' },
 
-    // Comments Styles
     commentItem: { flexDirection: 'row', marginBottom: 18, paddingHorizontal: 5 },
     commentAvatar: { width: 36, height: 36, borderRadius: 18, marginRight: 12, backgroundColor: '#333' },
     commentTextCol: { flex: 1 },
@@ -600,7 +662,6 @@ const styles = StyleSheet.create({
     commentPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 30 },
     commentPlaceholderText: { color: '#AAA', fontSize: 16, marginTop: 15 },
 
-    // Download Modal Styles
     modalOverlay: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'flex-end' },
     modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
     modalContent: { width: '50%', backgroundColor: '#1E1E1E', borderTopLeftRadius: 25, borderTopRightRadius: 0, paddingHorizontal: 12, paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 40 : 20, maxHeight: height * 0.75, minHeight: 350, elevation: 15, shadowColor: '#000', shadowOffset: { width: -5, height: 0 }, shadowOpacity: 0.3, shadowRadius: 10, zIndex: 10 },
