@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, StyleSheet, Text, ActivityIndicator, TouchableOpacity, FlatList, Image, Dimensions, StatusBar, SafeAreaView, ScrollView, Modal, Alert, Platform, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -9,6 +9,7 @@ import * as NavigationBar from 'expo-navigation-bar';
 const { width, height } = Dimensions.get('window');
 const PLAYER_HEIGHT = (width * 9) / 16; 
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
+const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 export default function PlayerScreen({ route, navigation }) {
   const { videoId, videoData = {} } = route?.params || {};
@@ -29,9 +30,10 @@ export default function PlayerScreen({ route, navigation }) {
   const [downloadType, setDownloadType] = useState('video'); 
   const [isDownloading, setIsDownloading] = useState(false);
 
-  // 🚀 Live Data States (Server Fetched)
+  // Live Data States (Server Fetched)
   const [liveAvatar, setLiveAvatar] = useState(null);
   const [description, setDescription] = useState('');
+  const [isLinkLoading, setIsLinkLoading] = useState(false); // 🚀 লিংক লোডিং স্টেট
   
   // Comments States
   const [comments, setComments] = useState([]);
@@ -64,14 +66,12 @@ export default function PlayerScreen({ route, navigation }) {
         setIsAudioMode(videoData?.type === 'audio');
         setIsInitialLoading(true);
 
-        // Reset Data
         setLiveAvatar(null);
         setDescription('');
         setComments([]);
         setCommentReplies({});
         setCommentNextToken(null);
 
-        // 🚀 ব্যাকগ্রাউন্ডে সার্ভার থেকে মিসিং চ্যানেল লোগো ও ডিসক্রিপশন আনা হচ্ছে
         fetch(`${MY_API_SERVER}/api/video-details?videoId=${videoId}`)
             .then(res => res.json())
             .then(data => {
@@ -116,25 +116,85 @@ export default function PlayerScreen({ route, navigation }) {
     DeviceEventEmitter.emit('toggleAudioMode', newMode);
   };
 
-  const handleLinkPress = (url) => {
-      setShowDescModal(false); 
-      if (url.includes('youtube.com') || url.includes('youtu.be')) {
-          navigation.navigate('searchsettings', { initialSearch: url });
+  // 🎯 হোম স্ক্রিনের মতো রিয়েল ডাটা ফেচিং লজিক
+  const handleLinkPress = async (url) => {
+      const cleanUrl = url.replace(/\s/g, ''); // স্পেস রিমুভ করা
+      const videoIdMatch = cleanUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:.*v=|.*\/|.*embed\/))([^&?]{11})/);
+
+      if (videoIdMatch && videoIdMatch[1]) {
+          const targetId = videoIdMatch[1];
+          setShowDescModal(false); 
+          setIsLinkLoading(true); // লোডিং শুরু
+          
+          try {
+              // 🚀 HomeScreen.js এর মতো ইউটিউব থেকে সরাসরি ভিডিওর সম্পূর্ণ ডেটা স্ক্র্যাপ করা হচ্ছে
+              const response = await fetch(`https://www.youtube.com/results?search_query=${targetId}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
+              const htmlText = await response.text();
+              const match = htmlText.match(/ytInitialData\s*=\s*({.+?});/) || htmlText.match(/var ytInitialData = (.*?);<\/script>/);
+              
+              if (match && match[1]) {
+                  const jsonData = JSON.parse(match[1]);
+                  let foundVideo = null;
+                  
+                  const extractNodes = (node) => {
+                      if (foundVideo) return;
+                      if (Array.isArray(node)) node.forEach(extractNodes);
+                      else if (node && typeof node === 'object') {
+                          if (node.videoRenderer && node.videoRenderer.videoId === targetId) {
+                              foundVideo = node.videoRenderer;
+                          } else {
+                              Object.values(node).forEach(extractNodes);
+                          }
+                      }
+                  };
+                  extractNodes(jsonData);
+
+                  if (foundVideo) {
+                      const avatarUrl = foundVideo.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails?.[0]?.url;
+                      const fullVideoData = {
+                          id: foundVideo.videoId,
+                          title: foundVideo.title?.runs?.[0]?.text || 'No Title',
+                          channel: foundVideo.ownerText?.runs?.[0]?.text || 'Channel',
+                          views: foundVideo.shortViewCountText?.simpleText || 'N/A',
+                          duration: foundVideo.lengthText?.simpleText || '',
+                          publishedTime: foundVideo.publishedTimeText?.simpleText || '',
+                          thumbnail: `https://i.ytimg.com/vi/${foundVideo.videoId}/hqdefault.jpg`,
+                          avatar: avatarUrl ? (avatarUrl.startsWith('//') ? 'https:' + avatarUrl : avatarUrl) : 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg',
+                          type: 'video'
+                      };
+                      
+                      setIsLinkLoading(false);
+                      // 🎯 সম্পূর্ণ ডাটা দিয়ে পুশ করা হচ্ছে (গ্লোবাল প্লেয়ার আর ক্র্যাশ করবে না)
+                      navigation.push('Player', { videoId: targetId, videoData: fullVideoData });
+                      return;
+                  }
+              }
+          } catch (e) {
+              console.log("Error fetching link data", e);
+          }
+          
+          setIsLinkLoading(false);
+          // ডাটা না পেলে ফলব্যাক হিসেবে সার্চ সেটিংসে পাঠাবে
+          navigation.navigate('searchsettings', { initialSearch: targetId });
+          
+      } else if (cleanUrl.includes('youtube.com') || cleanUrl.includes('youtu.be')) {
+          setShowDescModal(false); 
+          navigation.navigate('searchsettings', { initialSearch: cleanUrl });
       } else {
-          Linking.openURL(url).catch(err => console.error(err));
+          Linking.openURL(cleanUrl).catch(err => console.error(err));
       }
   };
 
   const renderDescriptionWithLinks = (text) => {
       if (!text) return null;
-      const urlRegex = /(https?:\/\/[^\s]+)/g;
+      const urlRegex = /(https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)[^\s]*\s*\?v=[^\s]+|https?:\/\/[^\s]+)/g;
       const parts = text.split(urlRegex);
 
       return parts.map((part, index) => {
           if (part.match(urlRegex)) {
               return (
                   <Text key={index} style={styles.clickableLink} onPress={() => handleLinkPress(part)}>
-                      {part}
+                      {part.replace(/\s/g, '')}
                   </Text>
               );
           }
@@ -142,14 +202,11 @@ export default function PlayerScreen({ route, navigation }) {
       });
   };
 
-  const loadDescription = () => {
-      setShowDescModal(true); 
-  };
+  const loadDescription = () => setShowDescModal(true); 
 
   const loadComments = async () => {
       setShowCommentModal(true);
       if (comments.length > 0) return;
-
       setIsCommentsLoading(true);
       try {
           const response = await fetch(`${MY_API_SERVER}/api/comments?videoId=${videoId}`);
@@ -158,15 +215,12 @@ export default function PlayerScreen({ route, navigation }) {
               setComments(data.comments);
               setCommentNextToken(data.nextContinuationToken || null);
           }
-      } catch (error) {
-          setComments([]);
-      }
+      } catch (error) { setComments([]); }
       setIsCommentsLoading(false);
   };
 
   const loadMoreComments = async () => {
       if (!commentNextToken || isMoreCommentsLoading) return;
-
       setIsMoreCommentsLoading(true);
       try {
           const response = await fetch(`${MY_API_SERVER}/api/comments?continuation=${encodeURIComponent(commentNextToken)}`);
@@ -181,14 +235,12 @@ export default function PlayerScreen({ route, navigation }) {
 
   const fetchCommentReplies = async (commentId, replyToken) => {
       if (!replyToken || loadingReplyId) return;
-      
       if (commentReplies[commentId]) {
           const updatedReplies = { ...commentReplies };
           delete updatedReplies[commentId];
           setCommentReplies(updatedReplies);
           return;
       }
-
       setLoadingReplyId(commentId);
       try {
           const response = await fetch(`${MY_API_SERVER}/api/comments?continuation=${encodeURIComponent(replyToken)}`);
@@ -202,11 +254,7 @@ export default function PlayerScreen({ route, navigation }) {
 
   const navigateToChannel = (channelName, channelAvatar, channelId) => {
       setShowCommentModal(false); 
-      navigation.navigate('Channel', { 
-          channelName: channelName, 
-          channelAvatar: channelAvatar,
-          channelId: channelId 
-      });
+      navigation.navigate('Channel', { channelName: channelName, channelAvatar: channelAvatar, channelId: channelId });
   };
 
   const handleDownloadExecute = async (item) => {
@@ -214,31 +262,21 @@ export default function PlayerScreen({ route, navigation }) {
       setShowDownloadModal(false);
       setIsDownloading(true);
       setTimeout(() => setIsDownloading(false), 2000);
-
       const downloadId = Date.now().toString(); 
       const safeTitle = (videoData.title || 'video').replace(/[<>:"\/\\|?*]+/g, '').trim();
       const targetUrl = `https://www.youtube.com/watch?v=${videoId}`;
-
       const dlApiUrl = `${MY_API_SERVER}/api/aria-download?id=${downloadId}&url=${encodeURIComponent(targetUrl)}&quality=${encodeURIComponent(item.quality)}&type=${downloadType}&title=${encodeURIComponent(safeTitle)}`;
-
       await fetch(dlApiUrl);
-    } catch (error) {
-      Alert.alert("Error", "Could not connect to server.");
-    }
+    } catch (error) { Alert.alert("Error", "Could not connect to server."); }
   };
 
   const openDownloadWindow = () => {
-      setShowDownloadModal(true);
-      setDownloadType('video'); 
-      setDownloadStep('fetching');
-      fetchDownloadLinks('video');
+      setShowDownloadModal(true); setDownloadType('video'); setDownloadStep('fetching'); fetchDownloadLinks('video');
   };
 
   const changeDownloadType = (type) => {
       if(downloadType === type) return;
-      setDownloadType(type);
-      setDownloadStep('fetching');
-      fetchDownloadLinks(type);
+      setDownloadType(type); setDownloadStep('fetching'); fetchDownloadLinks(type);
   };
 
   const fetchDownloadLinks = async (type) => {
@@ -248,15 +286,9 @@ export default function PlayerScreen({ route, navigation }) {
       const response = await fetch(apiUrl);
       const data = await response.json();
       if (data.success && data.availableLinks) {
-        setDownloadLinks(data.availableLinks);
-        setDownloadStep('list');
-      } else {
-        Alert.alert("Error", "No links found.");
-        setShowDownloadModal(false);
-      }
-    } catch (error) {
-      setShowDownloadModal(false);
-    }
+        setDownloadLinks(data.availableLinks); setDownloadStep('list');
+      } else { Alert.alert("Error", "No links found."); setShowDownloadModal(false); }
+    } catch (error) { setShowDownloadModal(false); }
   };
 
   const fetchRelatedVideos = async (isLoadMore = false) => {
@@ -277,17 +309,12 @@ export default function PlayerScreen({ route, navigation }) {
         setIsLoadingMore(false);
         return;
       }
-
       let searchQuery = "trending bangla";
-      if (videoData?.title) {
-          searchQuery = videoData.title.split(' ').slice(0, 4).join(' ');
-      }
-
+      if (videoData?.title) { searchQuery = videoData.title.split(' ').slice(0, 4).join(' '); }
       const response = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`);
       const text = await response.text();
       const match = text.match(/var ytInitialData = (.*?);<\/script>/);
       if (!match) return;
-
       const jsonData = JSON.parse(match[1]);
       const extractedVids = [];
       const extractNodes = (node) => {
@@ -295,19 +322,15 @@ export default function PlayerScreen({ route, navigation }) {
         else if (node && typeof node === 'object') {
           if (node.videoRenderer && node.videoRenderer.videoId !== videoId) {
             extractedVids.push({ 
-              id: node.videoRenderer.videoId, 
-              title: node.videoRenderer.title?.runs?.[0]?.text, 
-              channel: node.videoRenderer.ownerText?.runs?.[0]?.text, 
+              id: node.videoRenderer.videoId, title: node.videoRenderer.title?.runs?.[0]?.text, channel: node.videoRenderer.ownerText?.runs?.[0]?.text, 
               views: node.videoRenderer.viewCountText?.simpleText || node.videoRenderer.shortViewCountText?.simpleText || '', 
-              publishedTime: node.videoRenderer.publishedTimeText?.simpleText || '',
-              duration: node.videoRenderer.lengthText?.simpleText || '',
+              publishedTime: node.videoRenderer.publishedTimeText?.simpleText || '', duration: node.videoRenderer.lengthText?.simpleText || '',
               thumbnail: `https://i.ytimg.com/vi/${node.videoRenderer.videoId}/hqdefault.jpg`,
               avatar: node.videoRenderer.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails?.[0]?.url
             });
           } else Object.values(node).forEach(extractNodes);
         }
       };
-
       extractNodes(jsonData);
       setRelatedVideos(isLoadMore ? [...relatedVideos, ...extractedVids] : extractedVids.slice(0, 15));
     } catch (e) {} finally { setIsLoadingMore(false); }
@@ -322,6 +345,19 @@ export default function PlayerScreen({ route, navigation }) {
       });
   };
 
+  const formatQualityText = (text) => {
+      if (!text) return "";
+      return text.replace(/(\d+)p/, (match, heightStr) => {
+          const height = parseInt(heightStr);
+          if (height >= 1000) {
+              if (height === 1440) return '2K';
+              if (height === 2160) return '4K'; 
+              return (height / 1000).toFixed(1) + 'K'; 
+          }
+          return match; 
+      });
+  };
+
   const displayAvatar = liveAvatar 
       || (videoData?.avatar && videoData.avatar.trim() !== '' ? (videoData.avatar.startsWith('//') ? `https:${videoData.avatar}` : videoData.avatar) : null) 
       || `https://ui-avatars.com/api/?name=${encodeURIComponent(videoData?.channel || 'YT')}&background=random&color=fff&size=100`;
@@ -331,7 +367,7 @@ export default function PlayerScreen({ route, navigation }) {
       <Text style={styles.mainTitle}>{videoData?.title}</Text>
       <Text style={styles.mainViews}>{videoData?.views} {videoData?.publishedTime ? `• ${videoData.publishedTime}` : ''}</Text>
 
-      {/* 🎯 এখানে একশন বাটনগুলোর ব্যাকগ্রাউন্ড লেয়ার রিমুভ করা হয়েছে */}
+      {/* ট্রান্সপারেন্ট অ্যাকশন বাটনসমূহ */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actionRowContainer}>
           <TouchableOpacity style={styles.actionPill} onPress={loadDescription}>
               <Ionicons name="document-text-outline" size={18} color="#FFF" />
@@ -379,6 +415,14 @@ export default function PlayerScreen({ route, navigation }) {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar hidden={true} /> 
+
+      {/* 🚀 স্ক্র্যাপ করার সময় ইউজারকে লোডিং দেখানোর ওভারলে */}
+      {isLinkLoading && (
+        <View style={styles.linkLoadingOverlay}>
+            <ActivityIndicator size="large" color="#00BFA5" />
+            <Text style={styles.linkLoadingText}>Fetching video data...</Text>
+        </View>
+      )}
 
       <View style={styles.header}>
         <View style={styles.logoContainer}>
@@ -471,7 +515,7 @@ export default function PlayerScreen({ route, navigation }) {
         </View>
       </Modal>
 
-      {/* 2. Comments & Replies Modal (Viewing Only) */}
+      {/* 2. Comments Modal */}
       <Modal visible={showCommentModal} transparent animationType="slide" onRequestClose={() => setShowCommentModal(false)}>
         <View style={styles.bottomSheetOverlayFull}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setShowCommentModal(false)} />
@@ -595,7 +639,7 @@ export default function PlayerScreen({ route, navigation }) {
                           <Ionicons name={downloadType === 'audio' ? "headset" : "videocam"} size={18} color="#00BFA5" />
                       </View>
                       <View style={{ marginLeft: 10 }}>
-                        <Text style={styles.qualityText}>{item.quality}</Text>
+                        <Text style={styles.qualityText}>{formatQualityText(item.quality)}</Text>
                         <Text style={styles.qualitySubText}>{item.size || (downloadType === 'video' ? 'MP4' : 'MP3')}</Text>
                       </View>
                     </View>
@@ -635,7 +679,6 @@ const styles = StyleSheet.create({
     mainViews: { color: '#AAA', fontSize: 13, marginBottom: 15 },
 
     actionRowContainer: { flexDirection: 'row', alignItems: 'center', paddingBottom: 5 },
-    // 🎯 এখানে বাটনগুলোর ব্যাকগ্রাউন্ড, বর্ডার ও গোল শেপ সম্পূর্ণ রিমুভ করা হয়েছে
     actionPill: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, marginRight: 20 },
     actionPillText: { color: '#FFF', fontSize: 13, fontWeight: '600', marginLeft: 6 },
 
@@ -713,5 +756,8 @@ const styles = StyleSheet.create({
     qualityIconBg: { backgroundColor: 'rgba(0, 191, 165, 0.1)', padding: 8, borderRadius: 10 },
     qualityText: { color: '#FFF', fontSize: 14, fontWeight: 'bold' }, 
     qualitySubText: { color: '#888', fontSize: 10, marginTop: 2 }, 
-    downloadIconBtn: { padding: 5 }
+    downloadIconBtn: { padding: 5 },
+
+    linkLoadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center', zIndex: 999 },
+    linkLoadingText: { color: '#FFF', fontSize: 14, fontWeight: 'bold', marginTop: 10 }
 });
