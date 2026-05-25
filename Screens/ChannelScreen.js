@@ -24,6 +24,7 @@ export default function ChannelScreen() {
   const [isLoadingMore, setIsLoadingMore] = useState(false); 
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isLiveChannel, setIsLiveChannel] = useState(false); 
+  const [liveVideoData, setLiveVideoData] = useState(null);
   const [thumbQuality, setThumbQuality] = useState('High');
   const [subscriberCount, setSubscriberCount] = useState('N/A');
 
@@ -32,6 +33,7 @@ export default function ChannelScreen() {
   const [shortToken, setShortToken] = useState(null);
   const [apiKey, setApiKey] = useState(null);
 
+  // 🎯 ব্যানার এবং লোগো লোডিংয়ের স্টেট
   const [channelBanner, setChannelBanner] = useState(null);
   const [isBannerLoaded, setIsBannerLoaded] = useState(false);
 
@@ -56,141 +58,119 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🧠 আল্ট্রা-স্মার্ট স্ক্যানার (HomeScreen লজিক ব্যবহার করে)
+  // 🧠 স্মার্ট স্ক্যানার (Views এবং Published Time ফিক্স সহ)
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
     try {
-      const extractNodes = (node) => {
+      const stack = [{ node: rootNode, currentTitle: 'Unknown Title' }];
+      const seenIds = new Set();
+
+      while (stack.length > 0) {
+        const { node, currentTitle } = stack.pop();
+
+        let newTitle = currentTitle;
+
+        if (node && typeof node === 'object') {
+          let possibleTitle = node.title?.runs?.[0]?.text || 
+                              node.title?.simpleText || 
+                              node.headline?.runs?.[0]?.text || 
+                              node.headline?.simpleText ||
+                              node.title?.content || 
+                              node.metadata?.lockupMetadataViewModel?.title?.content || 
+                              node.overlayMetadata?.primaryText?.content; 
+
+          if (possibleTitle && typeof possibleTitle === 'string') {
+              newTitle = possibleTitle;
+          }
+        }
+
         if (Array.isArray(node)) {
-          node.forEach(extractNodes);
-          return;
-        }
-        if (!node || typeof node !== 'object') return;
+          for (let i = 0; i < node.length; i++) {
+            if (node[i] && typeof node[i] === 'object') stack.push({ node: node[i], currentTitle: newTitle });
+          }
+        } else if (node && typeof node === 'object') {
 
-        // Pagination token
-        if (node.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) {
-          categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
-        }
+          if (node.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) {
+            categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
+          }
 
-        // 🎯 1. HomeScreen এর মতো নির্দিষ্ট Renderer অবজেক্ট খোঁজা
-        let videoData = null;
-        let isShort = tabType === 'Shorts';
+          const hasVideoId = !!node.videoId;
+          if (hasVideoId && !seenIds.has(node.videoId)) {
+            seenIds.add(node.videoId);
+            const vId = node.videoId;
 
-        if (node.gridVideoRenderer) videoData = node.gridVideoRenderer;
-        else if (node.videoRenderer) videoData = node.videoRenderer;
-        else if (node.reelItemRenderer) { videoData = node.reelItemRenderer; isShort = true; }
-        else if (node.richItemRenderer?.content?.videoRenderer) videoData = node.richItemRenderer.content.videoRenderer;
-        else if (node.richItemRenderer?.content?.reelItemRenderer) { videoData = node.richItemRenderer.content.reelItemRenderer; isShort = true; }
-        else if (node.richItemRenderer?.content?.shortsLockupViewModel) { videoData = node.richItemRenderer.content.shortsLockupViewModel; isShort = true; }
-        else if (node.richItemRenderer?.content?.lockupViewModel) videoData = node.richItemRenderer.content.lockupViewModel;
-        else if (node.lockupViewModel) videoData = node.lockupViewModel;
-        else if (node.shortsLockupViewModel) { videoData = node.shortsLockupViewModel; isShort = true; }
+            let exactTitle = node.title?.runs?.[0]?.text || 
+                             node.title?.simpleText || 
+                             node.headline?.runs?.[0]?.text || 
+                             node.headline?.simpleText || 
+                             node.title?.content ||
+                             newTitle;
 
-        if (videoData) {
-            let vId = videoData.videoId || 
-                      videoData.contentId || 
-                      (videoData.entityId && videoData.entityId.startsWith('shorts-') ? videoData.entityId.replace('shorts-', '') : null);
-
-            if (vId) {
-                const targetList = categorizedData[isShort ? 'Shorts' : 'Videos'];
-                
-                // ডুপ্লিকেট চেক
-                if (!targetList.some(v => v.id === vId)) {
-                    
-                    let exactTitle = videoData.title?.runs?.[0]?.text || 
-                                     videoData.title?.simpleText || 
-                                     videoData.headline?.runs?.[0]?.text || 
-                                     videoData.headline?.simpleText || 
-                                     videoData.title?.content || 
-                                     videoData.metadata?.lockupMetadataViewModel?.title?.content ||
-                                     videoData.overlayMetadata?.primaryText?.content ||
-                                     'Unknown Title';
-
-                    let duration = videoData.lengthText?.simpleText || 
-                                   videoData.lengthText?.runs?.[0]?.text || 
-                                   videoData.contentImage?.thumbnailViewModel?.overlays?.[0]?.thumbnailOverlayTimeStatusRenderer?.text?.simpleText || 
-                                   '';
-                                   
-                    if (!duration && videoData.thumbnailOverlays) {
-                        const timeOverlay = videoData.thumbnailOverlays.find(o => o.thumbnailOverlayTimeStatusRenderer);
-                        if (timeOverlay) duration = timeOverlay.thumbnailOverlayTimeStatusRenderer.text?.simpleText || '';
-                    }
-
-                    let views = videoData.viewCountText?.simpleText || 
-                                videoData.viewCountText?.runs?.[0]?.text || 
-                                videoData.shortViewCountText?.simpleText || 
-                                videoData.shortViewCountText?.runs?.[0]?.text || 
-                                videoData.overlayMetadata?.secondaryText?.content ||
-                                '';
-                                
-                    let publishedTime = videoData.publishedTimeText?.simpleText || 
-                                        videoData.publishedTimeText?.runs?.[0]?.text || 
-                                        '';
-
-                    // নতুন মেটাডাটা ("15K views • 2 days ago") ফিল্টার
-                    const metaContent = videoData.metadata?.lockupMetadataViewModel?.metadata?.content;
-                    if (metaContent && typeof metaContent === 'string') {
-                        const parts = metaContent.split('•').map(p => p.trim());
-                        if (parts.length > 1) {
-                            if (!views) views = parts[0]; 
-                            if (!publishedTime) publishedTime = parts[1]; 
-                        } else if (parts.length === 1) {
-                            if (parts[0].toLowerCase().includes('view') || parts[0].includes('ভিজ্যুয়াল')) {
-                                if (!views) views = parts[0];
-                            } else {
-                                if (!publishedTime) publishedTime = parts[0];
-                            }
-                        }
-                    }
-
-                    // ফলব্যাক ভিডিও ইনফো
-                    if (!views || !publishedTime) {
-                        const vInfo = videoData.videoInfo?.runs || videoData.subtitle?.runs || [];
-                        const combinedText = vInfo.map(r => r.text).join('').trim();
-                        if (combinedText) {
-                            const parts = combinedText.split('•').map(p => p.trim());
-                            if (parts.length > 1) {
-                                if (!views) views = parts[0];
-                                if (!publishedTime) publishedTime = parts[1];
-                            }
-                        }
-                    }
-
-                    let isLive = JSON.stringify(videoData).includes('"BADGE_STYLE_TYPE_LIVE_NOW"') || (metaContent && metaContent.includes('watching'));
-
-                    let thumbUrl = `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
-                    const tmb = videoData.thumbnail?.thumbnails || videoData.contentImage?.thumbnailViewModel?.image?.sources;
-                    if (thumbQuality !== 'Data Saver' && tmb && tmb.length > 0) {
-                        thumbUrl = tmb[tmb.length - 1].url;
-                        if (thumbUrl.startsWith('//')) thumbUrl = 'https:' + thumbUrl;
-                    } else if (thumbQuality === 'Data Saver') {
-                        thumbUrl = `https://i.ytimg.com/vi/${vId}/mqdefault.jpg`;
-                    }
-
-                    const videoUrl = isShort ? `https://www.youtube.com/shorts/${vId}` : `https://www.youtube.com/watch?v=${vId}`;
-
-                    targetList.push({
-                        id: String(vId),
-                        title: String(exactTitle),
-                        value: videoUrl,
-                        channel: channelName,
-                        avatar: channelAvatar, 
-                        duration: duration || (isShort ? 'Short' : ''),
-                        publishedTime: publishedTime || (isLive ? 'Live Now' : ''),
-                        views: views,
-                        thumbnail: thumbUrl,
-                        isLive: isLive
-                    });
-                }
+            if (!exactTitle || exactTitle === 'Unknown Title') {
+               console.warn(`⚠️ [MyTube Warning]: Title not found for video ID - ${vId}. Defaulting to 'Unknown Title'.`);
+               exactTitle = 'Unknown Title'; 
             }
-            return; // 🎯 আসল ভিডিও কার্ড পাওয়ার পর ভেতরের ফেক কমান্ডগুলো স্ক্যান করা বন্ধ! (The Magic Fix)
+
+            // 🎯 Duration, Views এবং Published Time বের করার সাধারণ উপায়
+            let duration = node.lengthText?.simpleText || node.lengthText?.runs?.[0]?.text || '';
+            let publishedTime = node.publishedTimeText?.simpleText || node.publishedTimeText?.runs?.[0]?.text || '';
+            let views = node.viewCountText?.simpleText || node.viewCountText?.runs?.[0]?.text || node.shortViewCountText?.simpleText || node.shortViewCountText?.runs?.[0]?.text || '';
+
+            // 🎯 Duration এর অল্টারনেটিভ ফলব্যাক
+            if (!duration && node.thumbnailOverlays) {
+              const timeOverlay = node.thumbnailOverlays.find(o => o.thumbnailOverlayTimeStatusRenderer);
+              if (timeOverlay) {
+                duration = timeOverlay.thumbnailOverlayTimeStatusRenderer.text?.simpleText || '';
+              }
+            }
+
+            // 🎯 YouTube এর নতুন ViewModel আর্কিটেকচার থেকে Views ও Time বের করা
+            const metaContent = node.metadata?.lockupMetadataViewModel?.metadata?.content;
+            if (metaContent && typeof metaContent === 'string') {
+              // metaContent সাধারণত এমন হয়: "15K views • 2 days ago"
+              const parts = metaContent.split('•').map(p => p.trim());
+
+              if (parts.length > 1) {
+                if (!views) views = parts[0]; // প্রথম অংশ Views
+                if (!publishedTime) publishedTime = parts[1]; // দ্বিতীয় অংশ Published Time
+              } else if (parts.length === 1) {
+                if (parts[0].toLowerCase().includes('view') || parts[0].includes('ভিজ্যুয়াল')) {
+                   if (!views) views = parts[0];
+                } else {
+                   if (!publishedTime) publishedTime = parts[0];
+                }
+              }
+            }
+
+            const isLive = JSON.stringify(node).includes('"BADGE_STYLE_TYPE_LIVE_NOW"');
+
+            const thumbnailUrl = thumbQuality === 'Data Saver' 
+                ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
+                : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
+
+            const videoUrl = tabType === 'Shorts' 
+                ? `https://www.youtube.com/shorts/${vId}` 
+                : `https://www.youtube.com/watch?v=${vId}`;
+
+            categorizedData[tabType].unshift({
+              id: String(vId),
+              title: String(exactTitle),
+              value: videoUrl,
+              channel: channelName,
+              avatar: channelAvatar, 
+              duration: duration || (tabType === 'Shorts' ? 'Short' : ''),
+              publishedTime: publishedTime || (isLive ? 'Live Now' : ''),
+              views: views,
+              thumbnail: thumbnailUrl,
+              isLive: isLive
+            });
+          }
+
+          const values = Object.values(node);
+          for (let i = 0; i < values.length; i++) {
+            if (values[i] && typeof values[i] === 'object') stack.push({ node: values[i], currentTitle: newTitle });
+          }
         }
-
-        // যদি ভিডিও কার্ড না হয়, তবে ভেতরের ডাটা স্ক্যান করবে
-        Object.values(node).forEach(extractNodes);
-      };
-
-      extractNodes(rootNode);
-
+      }
     } catch (error) {
       console.error(`❌ [MyTube Error] extractDataIteratively (${tabType}) তে সমস্যা:`, error.message);
     }
@@ -225,10 +205,15 @@ export default function ChannelScreen() {
 
         if (bannerSources && Array.isArray(bannerSources) && bannerSources.length > 0) {
           let tempUrl = bannerSources[bannerSources.length - 1].url; 
-          if (tempUrl.startsWith('//')) tempUrl = 'https:' + tempUrl;
+
+          if (tempUrl.startsWith('//')) {
+              tempUrl = 'https:' + tempUrl;
+          }
+
           url = tempUrl;
           return;
         }
+
         Object.values(obj).forEach(search);
       };
       search(data);
@@ -279,10 +264,12 @@ export default function ChannelScreen() {
 
   const fetchChannelData = async () => {
     setLoading(true);
+    console.log(`📡 [MyTube Info] Fetching data for channel: ${channelName}`);
     try {
       let extractedChannelUrl = paramChannelUrl || channelData?.channelUrl || null;
 
       if (!extractedChannelUrl) {
+          console.log(`🔍 [MyTube Info] Channel URL পাওয়া যায়নি, সার্চ করে খোঁজা হচ্ছে...`);
           const searchResponse = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(channelName)}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
           const searchHtml = await searchResponse.text();
           const searchData = parseYtData(searchHtml);
@@ -305,9 +292,12 @@ export default function ChannelScreen() {
       }
 
       if (!extractedChannelUrl) {
+        console.error("❌ [MyTube Error] কোনোভাবেই Channel URL পাওয়া গেল না!");
         setLoading(false);
         return; 
       }
+
+      console.log(`✅ [MyTube Info] Target Channel URL: ${extractedChannelUrl}`);
 
       let targetVideosUrl = `https://www.youtube.com${extractedChannelUrl}/videos`;
       let targetShortsUrl = `https://www.youtube.com${extractedChannelUrl}/shorts`;
@@ -323,6 +313,7 @@ export default function ChannelScreen() {
       const apiMatch = videosHtml.match(/"INNERTUBE_API_KEY":"(.*?)"/);
       if (apiMatch && apiMatch[1]) {
           setApiKey(apiMatch[1]);
+          console.log(`🔑 [MyTube Info] API Key পাওয়া গেছে.`);
       }
 
       let parsedVideosData = parseYtData(videosHtml);
@@ -336,6 +327,7 @@ export default function ChannelScreen() {
 
       if (categorizedData.Videos.length === 0 && categorizedData.Shorts.length === 0) {
          try {
+            console.log(`⚠️ [MyTube Warning] Videos/Shorts ট্যাবে ডাটা নেই, Home ট্যাব থেকে চেষ্টা করা হচ্ছে...`);
             const homeRes = await fetch(`https://www.youtube.com${extractedChannelUrl}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
             const homeHtml = await homeRes.text();
             homeData = parseYtData(homeHtml);
@@ -344,7 +336,9 @@ export default function ChannelScreen() {
                if (!parsedVideosData) parsedVideosData = homeData; 
                extractDataIteratively(homeData, categorizedData, 'Videos');
             }
-         } catch (err) {}
+         } catch (err) {
+            console.error("❌ [MyTube Error] Home ট্যাব থেকে ডাটা আনতেও সমস্যা:", err.message);
+         }
       }
 
       categorizedData.Videos = categorizedData.Videos.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
@@ -354,6 +348,7 @@ export default function ChannelScreen() {
       setShortToken(categorizedData.ShortsToken);
 
       setTabData({ Videos: categorizedData.Videos, Shorts: categorizedData.Shorts });
+      console.log(`✅ [MyTube Info] Total Videos: ${categorizedData.Videos.length}, Total Shorts: ${categorizedData.Shorts.length}`);
 
       let extractedBanner = null;
       if (parsedVideosData) extractedBanner = findBannerUrl(parsedVideosData);
@@ -407,7 +402,8 @@ export default function ChannelScreen() {
     if (!currentToken || isLoadingMore || !apiKey) return;
 
     setIsLoadingMore(true);
-    
+    console.log(`📡 [MyTube Info] Pagination: আরও ${activeTab} লোড করা হচ্ছে...`);
+
     try {
       const response = await fetch(`https://www.youtube.com/youtubei/v1/browse?key=${apiKey}`, {
         method: 'POST',
@@ -422,6 +418,7 @@ export default function ChannelScreen() {
       try { 
         data = JSON.parse(responseText); 
       } catch (err) { 
+        console.error("❌ [MyTube Error] Pagination JSON Parse ফেইল করেছে:", err.message);
         setIsLoadingMore(false); 
         return; 
       }
@@ -430,13 +427,15 @@ export default function ChannelScreen() {
       extractDataIteratively(data, newData, activeTab);
 
       const filteredNewItems = newData[activeTab].filter(newObj => !tabData[activeTab].some(existingObj => existingObj.id === newObj.id));
-      
+
       setTabData(prev => ({ ...prev, [activeTab]: [...prev[activeTab], ...filteredNewItems] }));
+      console.log(`✅ [MyTube Info] আরও ${filteredNewItems.length} টি ${activeTab} যুক্ত করা হলো।`);
 
       if (activeTab === 'Videos') setVideoToken(newData.VideosToken || null);
       else setShortToken(newData.ShortsToken || null);
 
     } catch (error) {
+      console.error("❌ [MyTube Error] fetchMoreData (Pagination) ফেইল করেছে:", error.message);
     } finally { 
       setIsLoadingMore(false); 
     }
@@ -455,7 +454,9 @@ export default function ChannelScreen() {
         setIsSubscribed(true);
       }
       await AsyncStorage.setItem('subscribedChannels', JSON.stringify(parsedSubs));
-    } catch(e) {}
+    } catch(e) {
+      console.error("❌ [MyTube Error] Subscription টগল করতে সমস্যা:", e.message);
+    }
   };
 
   const handleVideoPress = (item) => {
