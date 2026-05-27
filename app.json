@@ -3,7 +3,7 @@
     "name": "BioDigital-Player",
     "slug": "bio-digital-truth",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "newArchEnabled": false,
@@ -18,7 +18,11 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.imtiaz.biodigitaltruth",
       "infoPlist": {
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": [
+          "audio",
+          "fetch",
+          "processing"
+        ]
       }
     },
     "android": {
@@ -28,6 +32,9 @@
       },
       "package": "com.imtiaz.biodigitaltruth",
       "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "ACCESS_WIFI_STATE",
         "WRITE_EXTERNAL_STORAGE",
         "READ_EXTERNAL_STORAGE",
         "READ_MEDIA_AUDIO",
@@ -35,7 +42,26 @@
         "NOTIFICATIONS",
         "WAKE_LOCK",
         "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+        "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "FOREGROUND_SERVICE_DATA_SYNC",
+        "REQUEST_INSTALL_PACKAGES",
+        "SYSTEM_ALERT_WINDOW",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            { "scheme": "https", "host": "*.youtube.com" },
+            { "scheme": "https", "host": "youtu.be" }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
       ]
     },
     "web": {
@@ -47,6 +73,10 @@
       "expo-file-system",
       "expo-navigation-bar",
       "expo-av",
+      "expo-screen-orientation",
+      "expo-background-fetch",
+      "expo-task-manager",
+      "expo-secure-store",
       [
         "expo-build-properties",
         {
