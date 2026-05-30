@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking, AppState, Image, Platform } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video'; 
-import { createAudioPlayer, setAudioModeAsync } from 'expo-audio'; // 🚨 expo-av সম্পূর্ণ বাদ দিয়ে expo-audio
+import { createAudioPlayer, setAudioModeAsync } from 'expo-audio'; 
 import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Slider from '@react-native-community/slider';
 import * as ScreenOrientation from 'expo-screen-orientation'; 
 import * as WebBrowser from 'expo-web-browser'; 
+import AsyncStorage from '@react-native-async-storage/async-storage'; // 🚨 Playlist Save ফিক্স করার জন্য ইম্পোর্ট করা হলো
 
 LogBox.ignoreLogs(['Video component', 'expo-audio', 'expo-video']);
 
@@ -24,7 +25,7 @@ const MY_API_SERVER = "http://127.0.0.1:10000";
 export default function GlobalPlayer() {
   const navigation = useNavigation();
   const videoViewRef = useRef(null); 
-  const syncAudioRef = useRef(null); // 🚨 expo-audio প্লেয়ার রেফারেন্স
+  const syncAudioRef = useRef(null); 
   
   const currentVideoIdRef = useRef(null);
   const fetchIdRef = useRef(0);
@@ -69,8 +70,8 @@ export default function GlobalPlayer() {
   const cachedAudioUrlRef = useRef(null); 
   
   const isSyncingRef = useRef(false);
+  const pendingSeekRef = useRef(null); // 🚨 ব্যাকগ্রাউন্ড অডিও পজিশন ফিক্স
 
-  // 🚨 Audio Focus ফিক্স (expo-audio ব্যবহার করে)
   useEffect(() => {
     const setupAudio = async () => {
       try {
@@ -85,7 +86,6 @@ export default function GlobalPlayer() {
     setupAudio();
   }, []);
 
-  // 🚨 সেফ রিলিজ ফাংশন
   const safeReleaseAudio = () => {
       if (syncAudioRef.current) {
           try { syncAudioRef.current.release(); } catch(e) {}
@@ -193,7 +193,6 @@ export default function GlobalPlayer() {
     } catch (error) { console.log(error); }
   };
 
-  // 🚨 [FIX 1] ভিডিও টেনে দেওয়ার সময় সিঙ্ক করার ইউনিভার্সাল ফাংশন (expo-audio) 🚨
   const seekTo = async (newTime) => {
       setCurrentTime(newTime); 
       try {
@@ -229,6 +228,7 @@ export default function GlobalPlayer() {
       setIsAudioMode(false);
       isAudioModeRef.current = false;
       cachedAudioUrlRef.current = null;
+      pendingSeekRef.current = null;
       
       setCurrentTime(0);
       setBuffered(0);
@@ -247,10 +247,9 @@ export default function GlobalPlayer() {
       isAudioModeRef.current = mode;
 
       if (mode) {
-          // 🚨 [FIX 2] ভিডিও বন্ধ করে অডিও রেডি করার কাজ 🚨
           resumeTimeRef.current = player ? player.currentTime : currentTime;
           if (player) player.pause();
-          setVideoSource(null); // ভিডিও কেটে গেল
+          setVideoSource(null); 
           setIsPlayingUI(true); 
 
           if (streamModeRef.current === 'separate' && syncAudioRef.current) {
@@ -265,12 +264,12 @@ export default function GlobalPlayer() {
                           audioUrlToPlay = json.audioUrl || json.url;
                           cachedAudioUrlRef.current = audioUrlToPlay; 
                       }
-                  } catch (e) { console.log(e); }
+                  } catch (e) {}
               }
               if (audioUrlToPlay) {
                   safeReleaseAudio();
                   syncAudioRef.current = createAudioPlayer(audioUrlToPlay);
-                  syncAudioRef.current.currentTime = resumeTimeRef.current;
+                  pendingSeekRef.current = resumeTimeRef.current; // 🚨 অডিও লোড হওয়ার পর সঠিক পজিশনে যাওয়ার কমান্ড
                   syncAudioRef.current.playbackRate = currentSpeed;
                   syncAudioRef.current.play();
               }
@@ -407,10 +406,15 @@ export default function GlobalPlayer() {
         if (isAudioMode) {
             isSyncingRef.current = true;
             try {
-                if (syncAudioRef.current) {
+                const isAudioReady = syncAudioRef.current && (syncAudioRef.current.duration > 0 || syncAudioRef.current.playing);
+                if (isAudioReady) {
                     setIsPlayingUI(syncAudioRef.current.playing);
-                    setBuffered(syncAudioRef.current.bufferedPosition || 0);
-                    if (!isSlidingRef.current) {
+
+                    if (pendingSeekRef.current !== null) {
+                        syncAudioRef.current.currentTime = pendingSeekRef.current;
+                        setCurrentTime(pendingSeekRef.current);
+                        pendingSeekRef.current = null;
+                    } else if (!isSlidingRef.current) {
                         setCurrentTime(syncAudioRef.current.currentTime);
                         if (syncAudioRef.current.duration > 0) setDuration(syncAudioRef.current.duration);
                     }
@@ -421,20 +425,21 @@ export default function GlobalPlayer() {
             setIsPlayingUI(player?.playing || false);
             
             if (player) {
-                if (player.bufferedPosition) setBuffered(player.bufferedPosition); 
                 if (!isSlidingRef.current && (player.currentTime > 0 || player.playing)) {
                     setCurrentTime(player.currentTime);
-                    setDuration(player.duration > 0 ? player.duration : 1);
+                    if (player.duration > 0) setDuration(player.duration);
                 }
             }
 
             if (streamMode === 'separate' && videoSource) {
                 isSyncingRef.current = true;
                 try {
-                    if (syncAudioRef.current) {
+                    const isAudioReady = syncAudioRef.current && (syncAudioRef.current.duration > 0 || syncAudioRef.current.playing);
+                    if (isAudioReady) {
                         if (player && player.playing) {
                             const diff = Math.abs(player.currentTime - syncAudioRef.current.currentTime);
-                            if (diff > 1.0) { 
+                            // 🚨 অডিও সাইলেন্ট হওয়ার বাগ ফিক্স: ১.৫ সেকেন্ডের বেশি পার্থক্য হলেই কেবল সিঙ্ক করবে 
+                            if (diff > 1.5) { 
                                 syncAudioRef.current.currentTime = player.currentTime;
                             }
                             if (!syncAudioRef.current.playing) syncAudioRef.current.play();
@@ -609,8 +614,6 @@ export default function GlobalPlayer() {
         {isInteractiveFull && showControls && !fallbackData && (
           <View style={styles.controls} pointerEvents="box-none">
              
-             {/* ওপর থেকে Settings Button রিমুভ করা হয়েছে */}
-             
              <View style={styles.centerRow} pointerEvents="box-none">
                 <TouchableOpacity onPress={async () => {
                     if (isAudioMode) {
@@ -663,7 +666,7 @@ export default function GlobalPlayer() {
 
                 <Text style={styles.timeTextRight}>{formatTime(duration)}</Text>
                 
-                {/* 🚨 [FIX 3] Settings বাটনটি এখন নিচে চলে এসেছে 🚨 */}
+                {/* 🚨 Settings বাটনটি এখন নিচে চলে এসেছে */}
                 <TouchableOpacity style={{marginLeft: 12}} onPress={() => setShowSettingsMenu(true)}>
                     <Ionicons name="settings-outline" size={22} color="#FFF" />
                 </TouchableOpacity>
@@ -696,9 +699,30 @@ export default function GlobalPlayer() {
                         <Text style={styles.menuText}>Playback Speed ({currentSpeed}x)</Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity style={styles.menuItem} onPress={() => {
+                    {/* 🚨 Save to Playlist ফুল লজিক */}
+                    <TouchableOpacity style={styles.menuItem} onPress={async () => {
                         setShowSettingsMenu(false);
-                        alert("Saved to Playlist successfully!");
+                        if (!videoData || !currentVideoIdRef.current) return;
+                        try {
+                            const existing = await AsyncStorage.getItem('saved_playlist');
+                            let playlist = existing ? JSON.parse(existing) : [];
+                            const isSaved = playlist.find(v => v.id === currentVideoIdRef.current);
+                            if (!isSaved) {
+                                playlist.unshift({
+                                    id: currentVideoIdRef.current,
+                                    title: videoData.title || "Video",
+                                    channel: videoData.channel || "Channel",
+                                    thumbnail: `https://i.ytimg.com/vi/${currentVideoIdRef.current}/hqdefault.jpg`,
+                                    views: videoData.views || ""
+                                });
+                                await AsyncStorage.setItem('saved_playlist', JSON.stringify(playlist));
+                                alert("ভিডিওটি প্লেলিস্টে সেভ হয়েছে!");
+                            } else {
+                                alert("ভিডিওটি আগে থেকেই প্লেলিস্টে আছে!");
+                            }
+                        } catch(e) {
+                            alert("সেভ করতে সমস্যা হয়েছে।");
+                        }
                     }}>
                         <Ionicons name="add-circle-outline" size={20} color="#FFF" style={styles.menuIcon} />
                         <Text style={styles.menuText}>Save to Playlist</Text>
