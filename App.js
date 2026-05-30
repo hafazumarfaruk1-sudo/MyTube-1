@@ -21,6 +21,8 @@ import SettingsScreen from './Settings/SettingsScreen';
 import HistoryPage from './Settings/HistoryPage';
 import downloadscreen from './Settings/downloadscreen'; // আপনার কমিট অনুযায়ী হুবহু রাখা হলো
 import SearchSetting from './Settings/searchsetting';
+import TrackPlayer from 'react-native-track-player';
+TrackPlayer.registerPlaybackService(() => require('./service.js'));
 import GlobalPlayer from './Settings/GlobalPlayer'; // ফ্লোটিং প্লেয়ার ইমপোর্ট
 
 const Stack = createStackNavigator();
