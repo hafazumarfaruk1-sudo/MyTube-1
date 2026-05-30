@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking, AppState, Image, Platform } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video'; 
-import { createAudioPlayer } from 'expo-audio'; 
-import { Audio } from 'expo-av'; // 🚨 Audio Focus ফিক্স করার জন্য এটি আবার আনা হয়েছে
+import { createAudioPlayer, setAudioModeAsync } from 'expo-audio'; // 🚨 expo-av সম্পূর্ণ বাদ দিয়ে expo-audio এর API আনা হয়েছে
 import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -10,7 +9,7 @@ import Slider from '@react-native-community/slider';
 import * as ScreenOrientation from 'expo-screen-orientation'; 
 import * as WebBrowser from 'expo-web-browser'; 
 
-LogBox.ignoreLogs(['[expo-av]', 'Video component from `expo-av`']);
+LogBox.ignoreLogs(['Video component', 'expo-audio', 'expo-video']);
 
 const windowDim = Dimensions.get('window');
 const PORTRAIT_WIDTH = Math.min(windowDim.width, windowDim.height);
@@ -71,11 +70,11 @@ export default function GlobalPlayer() {
   
   const isSyncingRef = useRef(false);
 
-  // 🚨 ফিক্স ১: Audio Session Mixing অ্যালাউ করা হলো যেন ভিডিও পজ না হয়
+  // 🚨 Audio Focus ফিক্স (expo-audio ব্যবহার করে)
   useEffect(() => {
     const setupAudio = async () => {
       try {
-        await Audio.setAudioModeAsync({
+        await setAudioModeAsync({
           staysActiveInBackground: true,
           playsInSilentModeIOS: true,
           shouldDuckAndroid: true,
@@ -86,7 +85,16 @@ export default function GlobalPlayer() {
     setupAudio();
   }, []);
 
-  // 🚨 ফিক্স ২: সেপারেট অডিও থাকলে ভিডিওর ডিফল্ট অডিও মিউট করা হলো
+  // 🚨 সেফ রিলিজ ফাংশন: মেমোরি লিক বা already released এরর বন্ধ করতে
+  const safeReleaseAudio = () => {
+      if (syncAudioRef.current) {
+          try {
+              syncAudioRef.current.release();
+          } catch(e) {}
+          syncAudioRef.current = null;
+      }
+  };
+
   const player = useVideoPlayer(videoSource, (p) => {
     if (!videoSource) return; 
     p.loop = false;
@@ -218,10 +226,7 @@ export default function GlobalPlayer() {
       baseScaleRef.current = 1;
       triggerControls();
 
-      if (syncAudioRef.current) {
-          syncAudioRef.current.release();
-          syncAudioRef.current = null;
-      }
+      safeReleaseAudio(); // 🚨 সেফ রিলিজ ব্যবহার করা হলো
 
       const targetQuality = global.appSettings?.normalVideo || '720p';
       fetchStreamUrl(data.videoId, targetQuality, fetchIdRef.current);
@@ -250,7 +255,7 @@ export default function GlobalPlayer() {
           }
 
           if (audioUrlToPlay) {
-              if (syncAudioRef.current) syncAudioRef.current.release();
+              safeReleaseAudio(); // 🚨 সেফ রিলিজ
               syncAudioRef.current = createAudioPlayer(audioUrlToPlay);
               syncAudioRef.current.currentTime = resumeTimeRef.current;
               syncAudioRef.current.playbackRate = currentSpeed;
@@ -263,8 +268,7 @@ export default function GlobalPlayer() {
           if (syncAudioRef.current) {
               resumeVideoTime = syncAudioRef.current.currentTime;
               if (streamModeRef.current !== 'separate') {
-                  syncAudioRef.current.release();
-                  syncAudioRef.current = null;
+                  safeReleaseAudio(); // 🚨 সেফ রিলিজ
               } else {
                   syncAudioRef.current.pause();
               }
@@ -333,9 +337,8 @@ export default function GlobalPlayer() {
     setStreamUrl(json.url);
     setVideoSource(json.url); 
     
-    // 🚨 ফিক্স ৩: শুধুমাত্র Separate মোড হলেই অডিও প্লে হবে, নতুবা ডাবল অডিও হয়ে যাবে
     if (json.audioUrl && currentMode === 'separate') {
-        if (syncAudioRef.current) syncAudioRef.current.release();
+        safeReleaseAudio(); // 🚨 সেফ রিলিজ
         syncAudioRef.current = createAudioPlayer(json.audioUrl);
         syncAudioRef.current.volume = 1.0;
         syncAudioRef.current.playbackRate = currentSpeed;
@@ -529,10 +532,7 @@ export default function GlobalPlayer() {
       setVideoSource(null); 
       if (player) player.pause();
       
-      if (syncAudioRef.current) {
-          syncAudioRef.current.release();
-          syncAudioRef.current = null;
-      }
+      safeReleaseAudio(); // 🚨 সেফ রিলিজ
   };
 
   const formatTime = (timeInSeconds) => {
