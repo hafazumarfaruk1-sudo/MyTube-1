@@ -10,7 +10,14 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import * as WebBrowser from 'expo-web-browser'; 
 import AsyncStorage from '@react-native-async-storage/async-storage'; 
 
-LogBox.ignoreLogs(['Video component', 'expo-audio', 'expo-video']);
+// 🚨 [FIXED]: স্ক্রিনশটের ওয়ার্নিংগুলো যেন আর না দেখায় তার জন্য ইগনোর লিস্টে যুক্ত করা হলো
+LogBox.ignoreLogs([
+  'Video component', 
+  'expo-audio', 
+  'expo-video',
+  'SafeAreaView has been deprecated',
+  'InteractionManager has been deprecated'
+]);
 
 const windowDim = Dimensions.get('window');
 const PORTRAIT_WIDTH = Math.min(windowDim.width, windowDim.height);
@@ -456,7 +463,7 @@ export default function GlobalPlayer() {
       setShowSettingsMenu(false);
   };
 
-  // 🚨 CPU সেভার সিঙ্ক অপ্টিমাইজেশন (expo-audio এর জন্য) 🚨
+  // 🚨 CPU সেভার সিঙ্ক অপ্টিমাইজেশন 🚨
   useEffect(() => {
     const interval = setInterval(async () => {
         if (isSyncingRef.current) return; 
@@ -682,7 +689,7 @@ export default function GlobalPlayer() {
         {isInteractiveFull && showControls && !fallbackData && (
           <View style={styles.controls} pointerEvents="box-none">
              
-             {/* 🚨 মূল প্লে/পজ লজিক আপনার আগের মতোই, শুধু ক্র্যাশ সেফটি অ্যাড করা 🚨 */}
+             {/* 🚨 মূল প্লে/পজ লজিক আপনার আগের মতোই 🚨 */}
              <View style={styles.centerRow} pointerEvents="box-none">
                 <TouchableOpacity onPress={async () => {
                     if (isAudioMode) {
@@ -890,9 +897,10 @@ const styles = StyleSheet.create({
   animatedVideoWrapper: { flex: 1, width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }, 
   video: { flex: 1, width: '100%', height: '100%' },
   
-  tapOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', zIndex: 5 }, 
+  // 🚨 [FIXED]: অ্যান্ড্রয়েডে আইকন ভাসিয়ে রাখার জন্য elevation যুক্ত করা হলো 🚨
+  tapOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', zIndex: 5, elevation: 5 }, 
   tapHalf: { flex: 1 },
-  controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
+  controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 10, elevation: 10 },
   
   centerRow: { flexDirection: 'row', alignItems: 'center', zIndex: 20 },
   bottomBar: { position: 'absolute', bottom: 5, width: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, zIndex: 20 },
