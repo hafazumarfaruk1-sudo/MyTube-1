@@ -38,6 +38,9 @@ export default function ShortsScreen({ initialVideoId, route }) {
   const [currentUrl, setCurrentUrl] = useState(`https://m.youtube.com/shorts/${initialVideoId || route?.params?.videoId || ''}`);
   const [currentChannel, setCurrentChannel] = useState({ name: 'Unknown Channel', isSubscribed: false });
 
+  // dynamic styles
+  const styles = getDynamicStyles(isDarkMode);
+
   const subscribeTimerRef = useRef(null);
   const currentChannelNameRef = useRef(''); 
   const shortsWebViewRef = useRef(null);
@@ -333,42 +336,44 @@ export default function ShortsScreen({ initialVideoId, route }) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#000', 
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 
-  },
-  header: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    paddingHorizontal: 12, 
-    height: 52, 
-    borderBottomWidth: 1, 
-    borderBottomColor: '#222', 
-    width: '100%', 
-    backgroundColor: '#0F0F0F' 
-  },
-  logoContainer: { flexDirection: 'row', alignItems: 'center', width: 105 },
-  logoText: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 4 },
-  searchBar: { flex: 1, flexDirection: 'row', backgroundColor: '#222', borderRadius: 20, marginHorizontal: 8, paddingHorizontal: 12, alignItems: 'center', height: 38 },
-  loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
-  skipOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
-  skipText: { color: '#FFF', marginTop: 15, fontWeight: 'bold' },
-  actionRowContainer: { position: 'absolute', bottom: "20%", left: 15, flexDirection: 'row', alignItems: 'center', zIndex: 99999, elevation: 100 },
-  nativeSubBtn: { backgroundColor: '#FF0000', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 25, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
-  nativeSubbedBtn: { backgroundColor: '#333', borderColor: '#555' },
-  nativeSubText: { color: '#FFF', fontWeight: 'bold', fontSize: 13 },
-  nativeSubbedText: { color: '#AAA' },
-  nativeShareBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 25, marginLeft: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
-  nativeShareText: { color: '#FFF', fontWeight: 'bold', fontSize: 13, marginLeft: 6 },
-  muteIconContainer: {
-    position: 'absolute',
-    top: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 65 : 100, // হেডারের ঠিক নিচে ডান সাইডে
-    right: 15,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    padding: 8,
-    borderRadius: 20,
-    zIndex: 99999,
-  }
-});
+function getDynamicStyles(isDark) {
+  return StyleSheet.create({
+    container: { 
+      flex: 1, 
+      backgroundColor: isDark ? '#000' : '#F9F9F9', 
+      paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 
+    },
+    header: { 
+      flexDirection: 'row', 
+      alignItems: 'center', 
+      paddingHorizontal: 12, 
+      height: 52, 
+      borderBottomWidth: 1, 
+      borderBottomColor: isDark ? '#222' : '#EAEAEA', 
+      width: '100%', 
+      backgroundColor: isDark ? '#0F0F0F' : '#FFFFFF' 
+    },
+    logoContainer: { flexDirection: 'row', alignItems: 'center', width: 105 },
+    logoText: { color: isDark ? '#FFF' : '#000', fontSize: 16, fontWeight: 'bold', marginLeft: 4 },
+    searchBar: { flex: 1, flexDirection: 'row', backgroundColor: isDark ? '#222' : '#F0F0F0', borderRadius: 20, marginHorizontal: 8, paddingHorizontal: 12, alignItems: 'center', height: 38 },
+    loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: isDark ? '#000' : 'rgba(255,255,255,0.9)', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
+    skipOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: isDark ? 'rgba(0,0,0,0.9)' : 'rgba(255,255,255,0.95)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
+    skipText: { color: isDark ? '#FFF' : '#000', marginTop: 15, fontWeight: 'bold' },
+    actionRowContainer: { position: 'absolute', bottom: "20%", left: 15, flexDirection: 'row', alignItems: 'center', zIndex: 99999, elevation: 100 },
+    nativeSubBtn: { backgroundColor: '#FF0000', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 25, borderWidth: 1, borderColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.06)' },
+    nativeSubbedBtn: { backgroundColor: isDark ? '#333' : '#EEE', borderColor: isDark ? '#555' : '#DDD' },
+    nativeSubText: { color: isDark ? '#FFF' : '#000', fontWeight: 'bold', fontSize: 13 },
+    nativeSubbedText: { color: isDark ? '#AAA' : '#666' },
+    nativeShareBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? 'rgba(0,0,0,0.7)' : 'rgba(0,0,0,0.05)', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 25, marginLeft: 10, borderWidth: 1, borderColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.06)' },
+    nativeShareText: { color: isDark ? '#FFF' : '#000', fontWeight: 'bold', fontSize: 13, marginLeft: 6 },
+    muteIconContainer: {
+      position: 'absolute',
+      top: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 65 : 100, // হেডারের ঠিক নিচে ডান সাইডে
+      right: 15,
+      backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)',
+      padding: 8,
+      borderRadius: 20,
+      zIndex: 99999,
+    }
+  });
+}

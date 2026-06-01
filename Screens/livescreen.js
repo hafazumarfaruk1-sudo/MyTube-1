@@ -39,6 +39,9 @@ export default function LiveScreen() {
   const { isDarkMode } = useTheme();
   const { t } = useLanguage();
   
+  // dynamic styles
+  const styles = getDynamicStyles(isDarkMode);
+
   const [videos, setVideos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -313,33 +316,34 @@ export default function LiveScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#0F0F0F',
-    // আপনার নির্দেশনা অনুযায়ী: স্ক্রিনের ৩২ ভাগের ১ ভাগ ওপরের টাইমের জন্য বরাদ্দ করা হলো
-    paddingTop: height / 70 
-  },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#222', width: '100%', backgroundColor: '#0F0F0F' },
-  logoContainer: { flexDirection: 'row', alignItems: 'center', width: 105 },
-  logoText: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 4 },
-  searchBar: { flex: 1, flexDirection: 'row', backgroundColor: '#222', borderRadius: 20, marginHorizontal: 8, paddingHorizontal: 12, alignItems: 'center', height: 38 },
-  
-  // Top Channels Styles
-  topChannelsContainer: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#222', marginBottom: 10 },
-  topChannelItem: { alignItems: 'center', marginHorizontal: 8, width: 70 },
-  topChannelLogo: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#333', borderWidth: 1, borderColor: '#444', resizeMode: 'cover' },
-  topChannelName: { color: '#FFF', fontSize: 11, marginTop: 6, textAlign: 'center' },
-  
-  // Video Card Styles
-  videoCard: { marginBottom: 15 },
-  thumbnailContainer: { position: 'relative' },
-  thumbnail: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#111' },
-  liveBadge: { position: 'absolute', bottom: 8, right: 8, backgroundColor: '#FF0000', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 },
-  liveBadgeText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
-  videoInfo: { flexDirection: 'row', padding: 12, alignItems: 'flex-start' },
-  channelAvatar: { width: 38, height: 38, borderRadius: 19, marginRight: 12, backgroundColor: '#333', resizeMode: 'cover' },
-  textContainer: { flex: 1, paddingRight: 10 },
-  title: { color: '#FFF', fontSize: 14, fontWeight: '500', marginBottom: 4 },
-  meta: { color: '#AAA', fontSize: 12 }
-});
+function getDynamicStyles(isDark) {
+  return StyleSheet.create({
+    container: { 
+      flex: 1, 
+      backgroundColor: isDark ? '#0F0F0F' : '#F9F9F9',
+      paddingTop: height / 70 
+    },
+    header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: isDark ? '#222' : '#EAEAEA', width: '100%', backgroundColor: isDark ? '#0F0F0F' : '#FFFFFF' },
+    logoContainer: { flexDirection: 'row', alignItems: 'center', width: 105 },
+    logoText: { color: isDark ? '#FFF' : '#000', fontSize: 16, fontWeight: 'bold', marginLeft: 4 },
+    searchBar: { flex: 1, flexDirection: 'row', backgroundColor: isDark ? '#222' : '#F0F0F0', borderRadius: 20, marginHorizontal: 8, paddingHorizontal: 12, alignItems: 'center', height: 38 },
+    
+    // Top Channels Styles
+    topChannelsContainer: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: isDark ? '#222' : '#EAEAEA', marginBottom: 10 },
+    topChannelItem: { alignItems: 'center', marginHorizontal: 8, width: 70 },
+    topChannelLogo: { width: 56, height: 56, borderRadius: 28, backgroundColor: isDark ? '#333' : '#EEE', borderWidth: 1, borderColor: isDark ? '#444' : '#DDD', resizeMode: 'cover' },
+    topChannelName: { color: isDark ? '#FFF' : '#000', fontSize: 11, marginTop: 6, textAlign: 'center' },
+    
+    // Video Card Styles
+    videoCard: { marginBottom: 15 },
+    thumbnailContainer: { position: 'relative' },
+    thumbnail: { width: '100%', aspectRatio: 16 / 9, backgroundColor: isDark ? '#111' : '#EAEAEA' },
+    liveBadge: { position: 'absolute', bottom: 8, right: 8, backgroundColor: '#FF0000', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 },
+    liveBadgeText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
+    videoInfo: { flexDirection: 'row', padding: 12, alignItems: 'flex-start' },
+    channelAvatar: { width: 38, height: 38, borderRadius: 19, marginRight: 12, backgroundColor: isDark ? '#333' : '#EEE', resizeMode: 'cover' },
+    textContainer: { flex: 1, paddingRight: 10 },
+    title: { color: isDark ? '#FFF' : '#000', fontSize: 14, fontWeight: '500', marginBottom: 4 },
+    meta: { color: isDark ? '#AAA' : '#666', fontSize: 12 }
+  });
+}
