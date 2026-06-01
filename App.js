@@ -1,12 +1,10 @@
 import 'react-native-gesture-handler';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
+import * as NavigationBar from 'expo-navigation-bar'; // সিস্টেম বার কন্ট্রোল করার জন্য
 
-// ==========================================
-// গ্লোবাল কনটেক্সট ইমপোর্ট
-// ==========================================
-import { ThemeProvider } from './ThemeContext'; 
+import { ThemeProvider, useTheme } from './ThemeContext'; 
 import { LanguageProvider } from './LanguageContext'; 
 
 // ==========================================
@@ -31,42 +29,62 @@ import GlobalPlayer from './Settings/GlobalPlayer';
 
 const Stack = createStackNavigator();
 
+// [NEW] MainApp নামে একটি চাইল্ড কম্পোনেন্ট তৈরি করা হলো, যাতে useTheme() কাজ করে
+function MainApp() {
+  const { isDarkMode } = useTheme();
+
+  useEffect(() => {
+    // থিম চেঞ্জ হওয়ার সাথে সাথে সিস্টেম নেভিগেশন বার আপডেট করার ফাংশন
+    const updateSystemNavigationBar = async () => {
+      try {
+        // সিস্টেম বারের ব্যাকগ্রাউন্ড কালার
+        await NavigationBar.setBackgroundColorAsync(isDarkMode ? '#000000' : '#FFFFFF');
+        // সিস্টেম বারের বাটন কালার (ডার্ক মোডে সাদা বাটন, লাইট মোডে কালো বাটন)
+        await NavigationBar.setButtonStyleAsync(isDarkMode ? 'light' : 'dark');
+      } catch (error) {
+        console.log("Navigation Bar Update Error:", error);
+      }
+    };
+
+    updateSystemNavigationBar();
+  }, [isDarkMode]);
+
+  return (
+    <NavigationContainer>
+      <Stack.Navigator 
+        initialRouteName="Home"
+        screenOptions={{
+          // পুরো অ্যাপের ব্যাকগ্রাউন্ডও থিম অনুযায়ী চেঞ্জ হবে
+          cardStyle: { backgroundColor: isDarkMode ? '#000000' : '#F5F5F5' } 
+        }}
+      >
+        <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="Channel" component={ChannelScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="Player" component={PlayerScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="Playlist" component={PlaylistPage} options={{ headerShown: false }} />
+        <Stack.Screen name="Shorts" component={ShortsScreen} options={{ headerShown: false }} />
+
+        <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="History" component={HistoryPage} options={{ headerShown: false }} />
+        <Stack.Screen name="Subscriptions" component={SubscriptionsScreen} options={{ headerShown: false }} />
+
+        <Stack.Screen name="searchsettings" component={SearchSetting} options={{ headerShown: false }} />
+        <Stack.Screen name="Downloads" component={downloadscreen} options={{ headerShown: false }} />
+        <Stack.Screen name="Live" component={livescreen} options={{ headerShown: false }} />
+      </Stack.Navigator>
+
+      {/* গ্লোবাল প্লেয়ার */}
+      <GlobalPlayer />
+    </NavigationContainer>
+  );
+}
+
+// মূল App কম্পোনেন্ট
 export default function App() {
   return (
     <ThemeProvider>
       <LanguageProvider>
-        <NavigationContainer>
-          <Stack.Navigator 
-            initialRouteName="Home"
-            screenOptions={{
-              cardStyle: { backgroundColor: '#000000' } // ডার্ক থিমের জন্য
-            }}
-          >
-            {/* মূল স্ক্রিনসমূহ */}
-            <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="Channel" component={ChannelScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="Player" component={PlayerScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="Playlist" component={PlaylistPage} options={{ headerShown: false }} />
-            <Stack.Screen name="Shorts" component={ShortsScreen} options={{ headerShown: false }} />
-
-            {/* সেটিংস এবং হিস্টোরি */}
-            <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="History" component={HistoryPage} options={{ headerShown: false }} />
-            <Stack.Screen name="Subscriptions" component={SubscriptionsScreen} options={{ headerShown: false }} />
-
-            {/* সার্চ অপশন */}
-            <Stack.Screen name="searchsettings" component={SearchSetting} options={{ headerShown: false }} />
-
-            {/* অন্যান্য স্ক্রিনগুলো */}
-            <Stack.Screen name="Downloads" component={downloadscreen} options={{ headerShown: false }} />
-            <Stack.Screen name="Live" component={livescreen} options={{ headerShown: false }} />
-
-          </Stack.Navigator>
-
-          {/* এই প্লেয়ারটি সব স্ক্রিনের উপরে ভাসবে এবং কখনো আনমাউন্ট হবে না */}
-          <GlobalPlayer />
-
-        </NavigationContainer>
+        <MainApp />
       </LanguageProvider>
     </ThemeProvider>
   );
