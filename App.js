@@ -2,72 +2,52 @@ import 'react-native-gesture-handler';
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
-// 🚨 [FIXED]: ওয়ার্নিং ইগনোর করার জন্য LogBox ইমপোর্ট করা হলো
-import { LogBox } from 'react-native';
 
-// 🚨 [FIXED]: স্ক্রিনশটের ওয়ার্নিংগুলো হাইড করা হলো
-LogBox.ignoreLogs([
-  'SafeAreaView has been deprecated',
-  'InteractionManager has been deprecated',
-  'Video component',
-  'expo-audio'
-]);
+// Providers ইমপোর্ট
+import { ThemeProvider } from './ThemeContext'; 
+import { LanguageProvider } from './LanguageContext'; // [NEW]
 
-// ==========================================
-// ১. Screens ফোল্ডার থেকে ফাইল ইমপোর্ট
-// ==========================================
+// স্ক্রিনসমূহ (আপনার আগের ইমপোর্টগুলো থাকবে...)
 import HomeScreen from './Screens/HomeScreen';
 import ChannelScreen from './Screens/ChannelScreen';
 import PlayerScreen from './Screens/PlayerScreen';
 import PlaylistPage from './Screens/PlaylistPage';
 import ShortsScreen from './Screens/ShortsScreen';
 import SubscriptionsScreen from './Screens/SubscriptionsScreen';
-import livescreen from './Screens/livescreen'; // আপনার কমিট অনুযায়ী হুবহু রাখা হলো
+import livescreen from './Screens/livescreen';
 
-// ==========================================
-// ২. Settings ফোল্ডার থেকে ফাইল ইমপোর্ট
-// ==========================================
 import SettingsScreen from './Settings/SettingsScreen';
 import HistoryPage from './Settings/HistoryPage';
-import downloadscreen from './Settings/downloadscreen'; // আপনার কমিট অনুযায়ী হুবহু রাখা হলো
+import downloadscreen from './Settings/downloadscreen'; 
 import SearchSetting from './Settings/searchsetting';
-import GlobalPlayer from './Settings/GlobalPlayer'; // ফ্লোটিং প্লেয়ার ইমপোর্ট
+import GlobalPlayer from './Settings/GlobalPlayer'; 
 
 const Stack = createStackNavigator();
 
 export default function App() {
   return (
-    <NavigationContainer>
-      <Stack.Navigator 
-        initialRouteName="Home"
-        screenOptions={{
-          cardStyle: { backgroundColor: '#000000' } // ডার্ক থিমের জন্য
-        }}
-      >
-        {/* মূল স্ক্রিনসমূহ */}
-        <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="Channel" component={ChannelScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="Player" component={PlayerScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="Playlist" component={PlaylistPage} options={{ headerShown: false }} />
-        <Stack.Screen name="Shorts" component={ShortsScreen} options={{ headerShown: false }} />
-
-        {/* সেটিংস এবং হিস্টোরি */}
-        <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="History" component={HistoryPage} options={{ headerShown: false }} />
-        <Stack.Screen name="Subscriptions" component={SubscriptionsScreen} options={{ headerShown: false }} />
-
-        {/* সার্চ অপশনটি আপনার নির্দেশ অনুযায়ী পূর্ববর্তী ফিক্সের মতো রাখা হলো */}
-        <Stack.Screen name="searchsettings" component={SearchSetting} options={{ headerShown: false }} />
-
-        {/* [FIX]: মিসিং স্ক্রিনগুলো এখানে স্ট্যাকে রেজিস্টার করা হলো */}
-        <Stack.Screen name="Downloads" component={downloadscreen} options={{ headerShown: false }} />
-        <Stack.Screen name="Live" component={livescreen} options={{ headerShown: false }} />
-
-      </Stack.Navigator>
-
-      {/* এই প্লেয়ারটি সব স্ক্রিনের উপরে ভাসবে এবং কখনো আনমাউন্ট হবে না */}
-      <GlobalPlayer />
-
-    </NavigationContainer>
+    <ThemeProvider>
+      <LanguageProvider> {/* [NEW] LanguageProvider যোগ করা হলো */}
+        <NavigationContainer>
+          <Stack.Navigator 
+            initialRouteName="Home"
+            screenOptions={{ cardStyle: { backgroundColor: '#000000' } }}
+          >
+            <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="Channel" component={ChannelScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="Player" component={PlayerScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="Playlist" component={PlaylistPage} options={{ headerShown: false }} />
+            <Stack.Screen name="Shorts" component={ShortsScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="History" component={HistoryPage} options={{ headerShown: false }} />
+            <Stack.Screen name="Subscriptions" component={SubscriptionsScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="searchsettings" component={SearchSetting} options={{ headerShown: false }} />
+            <Stack.Screen name="Downloads" component={downloadscreen} options={{ headerShown: false }} />
+            <Stack.Screen name="Live" component={livescreen} options={{ headerShown: false }} />
+          </Stack.Navigator>
+          <GlobalPlayer />
+        </NavigationContainer>
+      </LanguageProvider>
+    </ThemeProvider>
   );
 }
