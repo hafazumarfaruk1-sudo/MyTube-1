@@ -4,6 +4,10 @@ import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import * as NavigationBar from 'expo-navigation-bar';
 
+// Theme & Language
+import { useTheme } from '../ThemeContext';
+import { useLanguage } from '../LanguageContext';
+
 const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 const LIVE_QUERIES = [
@@ -52,7 +56,7 @@ export default function LiveScreen() {
       NavigationBar.setBackgroundColorAsync(bgColor);
       NavigationBar.setButtonStyleAsync(isDarkMode ? 'light' : 'dark');
     }
-  }, [isFocused]);
+  }, [isFocused, isDarkMode]);
 
   useEffect(() => {
     const randomQuery = LIVE_QUERIES[Math.floor(Math.random() * LIVE_QUERIES.length)];
