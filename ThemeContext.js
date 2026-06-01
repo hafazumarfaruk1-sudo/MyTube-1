@@ -8,13 +8,12 @@ export const ThemeContext = createContext();
 export const ThemeProvider = ({ children }) => {
   const [isDarkMode, setIsDarkMode] = useState(true);
 
-  // সিস্টেম নেভিগেশন বারের কালার আপডেট করার স্ট্যান্ডার্ড ফাংশন
+  // সিস্টেম নেভিগেশন বারের কালার ফোর্স আপডেট করার ফাংশন
   const updateSystemNav = async (isDark) => {
     if (Platform.OS === 'android') {
       try {
-        // ডার্ক মোডে কালো (#0a0a0a) এবং লাইট মোডে সাদা (#FFFFFF)
-        const bgColor = isDark ? '#0a0a0a' : '#FFFFFF';
-        
+        // আপনার বটম ট্যাবের কালারের সাথে ম্যাচ করে ডার্ক মোডে #0a0a0a দেওয়া হয়েছে
+        const bgColor = isDark ? '#0a0a0a' : '#ffffff';
         await NavigationBar.setBackgroundColorAsync(bgColor);
         await NavigationBar.setButtonStyleAsync(isDark ? 'light' : 'dark');
       } catch (error) {
@@ -27,13 +26,13 @@ export const ThemeProvider = ({ children }) => {
     const loadTheme = async () => {
       try {
         const savedTheme = await AsyncStorage.getItem('appTheme');
-        if (savedTheme !== null) {
-          const isDark = savedTheme === 'dark';
-          setIsDarkMode(isDark);
+        const isDark = savedTheme !== null ? savedTheme === 'dark' : true;
+        setIsDarkMode(isDark);
+        
+        // অ্যাপ লোড হওয়ার সময় নেভিগেশন ওভাররাইড ঠেকানোর জন্য 100ms ডিলিট (Delay)
+        setTimeout(() => {
           updateSystemNav(isDark);
-        } else {
-          updateSystemNav(true);
-        }
+        }, 100);
       } catch (e) {}
     };
     loadTheme();
