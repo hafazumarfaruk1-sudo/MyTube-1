@@ -1,7 +1,5 @@
-import { requireNativeModule } from 'expo-modules-core';
+import { NativeModulesProxy } from 'expo-modules-core';
 
 import { BackgroundNotificationTasksModule } from './BackgroundNotificationTasksModule.types';
 
-export default requireNativeModule<BackgroundNotificationTasksModule>(
-  'ExpoBackgroundNotificationTasksModule'
-);
+export default NativeModulesProxy.ExpoBackgroundNotificationTasksModule as BackgroundNotificationTasksModule;

@@ -1,18 +1,6 @@
-// MessageQueue বাইপাস করার জন্য Polyfill (Expo Go ক্র্যাশ ফিক্স)
-// MessageQueue বাইপাস করার জন্য Polyfill (Expo Go ক্র্যাশ ফিক্স)
-// React Native এর অভ্যন্তরীণ উপাদান দ্বারা অ্যাক্সেস করা কিছু মূল বৈশিষ্ট্য যোগ করা হয়েছে।
-// এটি Hermes এবং expo-dev-client পরিবেশে আরও স্থিতিশীলতা দিতে সাহায্য করতে পারে।
+// একদম ১ নম্বর লাইনে এই ফিক্স থাকতে হবে (কোনো import-এর আগে)
 if (!global.MessageQueue) {
-  global.MessageQueue = {
-    // সাধারণত কনসোল স্পাইংয়ের জন্য ব্যবহৃত হয়
-    spy: () => {},
-    // টাচেবল উপাদানগুলির জন্য ব্যবহৃত হয়
-    _touchableRegions: [],
-    // নেটিভ মডিউলগুলিতে কল পাঠানোর জন্য ব্যবহৃত হয়
-    enqueueNativeCall: () => {},
-    // রিমোট মডিউলগুলির একটি টেবিল যা মাঝে মাঝে প্রত্যাশিত হয়
-    _remoteModuleTable: {}, 
-  };
+  global.MessageQueue = { spy: () => {} };
 }
 
 import 'react-native-reanimated';
@@ -40,8 +28,6 @@ class ErrorBoundary extends React.Component {
           <Text style={{ fontSize: 16, color: 'white', marginVertical: 10 }}>
             নিচের সম্পূর্ণ লগটি পড়ুন বা স্ক্রিনশট নিন:
           </Text>
-
-          {/* স্ক্রল করে পুরো এরর পড়ার ব্যবস্থা */}
           <ScrollView style={{ backgroundColor: 'black', padding: 10, borderRadius: 5 }}>
             <Text style={{ color: '#00FF00', fontSize: 13 }}>
               {this.state.error ? `${this.state.error.message}\n\n${this.state.error.stack}` : 'Unknown Error'}
@@ -54,14 +40,12 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-// ২. গ্লোবাল ক্র্যাশ ক্যাচার (নেটিভ বা ব্যাকগ্রাউন্ড এররের জন্য)
 global.ErrorUtils.setGlobalHandler((error, isFatal) => {
   if (isFatal) {
     alert(`🔴 Fatal Error:\n${error.message}\n\n${error.stack}`);
   }
 });
 
-// মূল অ্যাপকে এরর বাউন্ডারি দিয়ে মুড়ে দেওয়া হলো
 const MyTubeRoot = () => (
   <ErrorBoundary>
     <App />

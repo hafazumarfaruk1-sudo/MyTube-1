@@ -1,3 +1,3 @@
-import { requireNativeModule } from 'expo-modules-core';
-export default requireNativeModule('ExpoBackgroundNotificationTasksModule');
+import { NativeModulesProxy } from 'expo-modules-core';
+export default NativeModulesProxy.ExpoBackgroundNotificationTasksModule;
 //# sourceMappingURL=BackgroundNotificationTasksModule.native.js.map

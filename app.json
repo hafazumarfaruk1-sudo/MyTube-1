@@ -7,7 +7,7 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "newArchEnabled": false,
-    "jsEngine": "hermes",
+    "jsEngine": "jsc",
     "scheme": "biodigital",
     "splash": {
       "image": "./assets/splashm.png",
@@ -111,22 +111,20 @@
           }
         }
       ],
-      "expo-web-browser",
       "expo-background-fetch",
-      "expo-secure-store",
-      "expo-audio",
-      "expo-sharing",
-      "expo-sqlite",
       [
         "expo-video",
         {
           "supportsPictureInPicture": true
         }
-      ],
+      ]
     ],
     "extra": {
-      "expo-navigation-bar": {}
+      "expo-navigation-bar": {},
+      "eas": {
+        "projectId": "82863962-ee52-4aca-87ca-cd6453b84944"
+      }
     },
-    "owner": "omarali_2030"
+    "owner": "omarali_2031"
   }
 }

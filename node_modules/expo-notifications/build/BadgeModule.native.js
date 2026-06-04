@@ -1,12 +1,11 @@
-import { requireNativeModule } from 'expo-modules-core';
-const nativeModule = requireNativeModule('ExpoBadgeModule');
+import { NativeModulesProxy } from 'expo-modules-core';
 export default {
-    ...nativeModule,
+    ...NativeModulesProxy.ExpoBadgeModule,
     // We overwrite setBadgeCountAsync to omit
     // an obsolete options argument when calling
     // the native function.
     setBadgeCountAsync: async (badgeCount, options) => {
-        return await nativeModule.setBadgeCountAsync(badgeCount);
+        return await NativeModulesProxy.ExpoBadgeModule.setBadgeCountAsync(badgeCount);
     },
 };
 //# sourceMappingURL=BadgeModule.native.js.map
