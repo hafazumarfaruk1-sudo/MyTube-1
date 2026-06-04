@@ -2,6 +2,9 @@
 if (!global.MessageQueue) {
   global.MessageQueue = {
     spy: () => {},
+    // Adding _touchableRegions, which is sometimes accessed early by React Native runtime
+    // especially with Hermes enabled, to prevent "Property 'MessageQueue' doesn't exist" errors.
+    _touchableRegions: [], 
   };
 }
 
