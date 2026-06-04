@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, SafeAreaView, StatusBar, Alert } from 'react-native';
+
+// Theme & Language
+import { useTheme } from '../ThemeContext';
+import { useLanguage } from '../LanguageContext';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIsFocused } from '@react-navigation/native';
@@ -27,6 +31,8 @@ const timeAgoBn = (timestamp) => {
 export default function DownloadScreen({ navigation }) {
   const [downloads, setDownloads] = useState([]);
   const isFocused = useIsFocused();
+  const { isDarkMode } = useTheme();
+  const { t } = useLanguage();
 
   const loadDownloads = async () => {
     try {
@@ -100,7 +106,7 @@ export default function DownloadScreen({ navigation }) {
                 });
 
                 if (needsSave) {
-                    AsyncStorage.setItem('recorded_downloads', JSON.stringify(updatedList));
+                    (async () => { try { await AsyncStorage.setItem('recorded_downloads', JSON.stringify(updatedList)); } catch (e) { console.error(e); } })();
                 }
                 return updatedList;
             });
@@ -114,9 +120,11 @@ export default function DownloadScreen({ navigation }) {
     Alert.alert("মুছে ফেলুন", "আপনি কি এই ডাউনলোডের রেকর্ডটি মুছে ফেলতে চান?", [
       { text: "না", style: "cancel" },
       { text: "হ্যাঁ", onPress: async () => {
-          const newList = downloads.filter(item => item.id !== id);
-          setDownloads(newList);
-          await AsyncStorage.setItem('recorded_downloads', JSON.stringify(newList));
+          try {
+            const newList = downloads.filter(item => item.id !== id);
+            setDownloads(newList);
+            await AsyncStorage.setItem('recorded_downloads', JSON.stringify(newList));
+          } catch (e) { console.error(e); }
         }
       }
     ]);
@@ -197,13 +205,13 @@ export default function DownloadScreen({ navigation }) {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar backgroundColor="#0F0F0F" barStyle="light-content" />
+    <SafeAreaView style={[styles.container, { backgroundColor: isDarkMode ? '#0F0F0F' : '#F9F9F9' }]}>
+      <StatusBar backgroundColor={isDarkMode ? '#0F0F0F' : '#FFFFFF'} barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color="#FFF" />
+          <Ionicons name="arrow-back" size={24} color={isDarkMode ? '#FFF' : '#000'} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>ডাউনলোডসমূহ</Text>
+        <Text style={[styles.headerTitle, { color: isDarkMode ? '#FFF' : '#000' }]}>{t('download') || 'ডাউনলোডসমূহ'}</Text>
       </View>
 
       <FlatList 
@@ -224,7 +232,7 @@ export default function DownloadScreen({ navigation }) {
           activeDownloads.length === 0 && completedDownloads.length === 0 && (
             <View style={styles.empty}>
               <Ionicons name="download-outline" size={80} color="#333" />
-              <Text style={styles.emptyText}>কোনো ডাউনলোড পাওয়া যায়নি</Text>
+              <Text style={styles.emptyText}>{__translate('কোনো ডাউনলোড পাওয়া যায়নি')}</Text>
             </View>
           )
         }
