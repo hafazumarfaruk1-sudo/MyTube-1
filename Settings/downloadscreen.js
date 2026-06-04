@@ -15,7 +15,7 @@ const timeAgoBn = (timestamp) => {
   if (!timestamp) return "";
   const now = Date.now();
   const past = new Date(timestamp).getTime();
-  if (isNaN(past)) return timestamp; // যদি পুরানো স্ট্রিং ডেট থাকে
+  if (isNaN(past)) return timestamp; 
 
   const diffMs = now - past;
   const diffMins = Math.floor(diffMs / 60000);
@@ -41,7 +41,6 @@ export default function DownloadScreen({ navigation }) {
           let parsed = JSON.parse(data);
           parsed = parsed.filter(item => item && item.id && item.title);
           setDownloads(parsed);
-          await AsyncStorage.setItem('recorded_downloads', JSON.stringify(parsed));
       }
     } catch (e) { console.error(e); }
   };
@@ -50,6 +49,7 @@ export default function DownloadScreen({ navigation }) {
     if (isFocused) loadDownloads();
   }, [isFocused]);
 
+  // 🎯 লাইভ ডাউনলোড ট্র্যাকিং লজিক
   useEffect(() => {
     const interval = setInterval(async () => {
         try {
@@ -66,14 +66,15 @@ export default function DownloadScreen({ navigation }) {
                     const existsIndex = updatedList.findIndex(d => d.id === id);
 
                     if (existsIndex === -1 && activeItem.status !== 'error') {
+                        // নতুন ডাউনলোড শুরু হলে লিস্টে যোগ করবে
                         updatedList.unshift({
                             id: id, 
-                            videoId: activeItem.videoId, 
+                            videoId: activeItem.videoId || id, 
                             title: activeItem.title || 'Downloading...', 
-                            thumbnail: activeItem.thumbnail, 
-                            quality: activeItem.quality, 
-                            type: activeItem.type, 
-                            date: Date.now(), // সময় স্ট্যাম্প সেট করা হচ্ছে
+                            thumbnail: activeItem.thumbnail || `https://ui-avatars.com/api/?name=DL&background=00BFA5&color=fff&size=150`, 
+                            quality: activeItem.quality || 'N/A', 
+                            type: activeItem.type || 'Media', 
+                            date: Date.now(), 
                             progress: activeItem.progress || '0', 
                             speed: activeItem.speed || '0 KB/s',
                             eta: activeItem.eta || '--:--',
@@ -82,36 +83,37 @@ export default function DownloadScreen({ navigation }) {
                         });
                         needsSave = true;
                     } else if (existsIndex !== -1) {
-                        const item = updatedList[existsIndex];
+                        // চলমান ডাউনলোডের প্রোগ্রেস আপডেট করবে
+                        const item = {...updatedList[existsIndex]}; 
+                        
                         if (activeItem.status === 'completed' && !item.isCompleted) {
                             item.progress = '100';
                             item.isCompleted = true;
                             item.localUri = activeItem.localUrl;
-                            item.date = Date.now(); // সম্পন্ন হওয়ার সময়
+                            item.date = Date.now(); 
                             needsSave = true;
-                            fetch(`${MY_API_SERVER}/api/clear-progress?id=${id}`); 
+                            fetch(`${MY_API_SERVER}/api/clear-progress?id=${id}`).catch(()=>{}); 
                         } else if (activeItem.status === 'error' && !item.isError) {
                             item.isError = true;
                             needsSave = true;
                         } else {
-                            if (item.progress !== activeItem.progress || item.speed !== activeItem.speed || item.eta !== activeItem.eta) {
+                            if (item.progress !== activeItem.progress || item.speed !== activeItem.speed) {
                                 item.progress = activeItem.progress;
                                 item.speed = activeItem.speed;
                                 item.eta = activeItem.eta;
-                                // স্টেট আপডেটের জন্য
-                                updatedList[existsIndex] = { ...item }; 
                             }
                         }
+                        updatedList[existsIndex] = item;
                     }
                 });
 
                 if (needsSave) {
-                    (async () => { try { await AsyncStorage.setItem('recorded_downloads', JSON.stringify(updatedList)); } catch (e) { console.error(e); } })();
+                    AsyncStorage.setItem('recorded_downloads', JSON.stringify(updatedList)).catch(()=>{});
                 }
                 return updatedList;
             });
         } catch(e) {}
-    }, 1000); 
+    }, 1000); // প্রতি ১ সেকেন্ডে সার্ভার থেকে লাইভ ডেটা আনবে
 
     return () => clearInterval(interval);
   }, []);
@@ -131,9 +133,9 @@ export default function DownloadScreen({ navigation }) {
   };
 
   const cancelActiveDownload = async (id) => {
-    Alert.alert("confirm to delete permanently", "আপনি কি এই চলমান ডাউনলোডটি বাতিল করতে চান?", [
-      { text: "Cancel", style: "cancel" },
-      { text: "OK", onPress: async () => {
+    Alert.alert("Cancel Download", "আপনি কি এই চলমান ডাউনলোডটি বাতিল করতে চান?", [
+      { text: "না", style: "cancel" },
+      { text: "হ্যাঁ", onPress: async () => {
           try {
              await fetch(`${MY_API_SERVER}/api/cancel-download?id=${id}`);
              const newList = downloads.filter(item => item.id !== id);
@@ -168,7 +170,7 @@ export default function DownloadScreen({ navigation }) {
         </Text>
         <Text style={styles.metaPercentage}>ডাউনলোড হচ্ছে... {item.progress || 0}%</Text>
         <View style={styles.progressBarBg}>
-          <View style={[styles.progressBarFill, { width: `${item.progress || 0}%` }]} />
+          <View style={[styles.progressBarFill, { width: `${parseFloat(item.progress) || 0}%` }]} />
         </View>
       </View>
       <TouchableOpacity style={styles.cancelBtn} onPress={() => cancelActiveDownload(item.id)}>
@@ -181,7 +183,6 @@ export default function DownloadScreen({ navigation }) {
     <View style={styles.card}>
       <TouchableOpacity style={styles.cardMain} activeOpacity={0.8} onPress={() => handlePlayVideo(item)}>
         
-        {/* অডিও হলে হাফ থাম্বনেইল এবং হাফ আইকন */}
         {item.type === 'audio' ? (
            <View style={styles.splitThumbContainer}>
               <Image source={{ uri: item.thumbnail }} style={styles.halfThumb} />
@@ -207,11 +208,10 @@ export default function DownloadScreen({ navigation }) {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: isDarkMode ? '#0F0F0F' : '#F9F9F9' }]}>
       <StatusBar backgroundColor={isDarkMode ? '#0F0F0F' : '#FFFFFF'} barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={isDarkMode ? '#FFF' : '#000'} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: isDarkMode ? '#FFF' : '#000' }]}>{t('download') || 'ডাউনলোডসমূহ'}</Text>
+      
+      {/* 🎯 আপডেট করা হেডার (ব্যাক বাটন ছাড়া) */}
+      <View style={[styles.header, { backgroundColor: isDarkMode ? '#0F0F0F' : '#FFFFFF', borderBottomColor: isDarkMode ? '#222' : '#E5E5E5' }]}>
+        <Text style={[styles.headerTitle, { color: isDarkMode ? '#FFF' : '#000' }]}>মাই ডাউনলোড লিস্ট</Text>
       </View>
 
       <FlatList 
@@ -242,10 +242,10 @@ export default function DownloadScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F0F0F' },
-  header: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#222' },
-  backBtn: { marginRight: 15 },
-  headerTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  container: { flex: 1 },
+  // হেডারের স্টাইল সেন্টারে নিয়ে আসা হয়েছে
+  header: { alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1 },
+  headerTitle: { fontSize: 20, fontWeight: 'bold' },
   list: { padding: 10 },
   sectionTitle: { color: '#00BFA5', fontSize: 16, fontWeight: 'bold', marginBottom: 10, marginLeft: 5 },
   activeCard: { flexDirection: 'row', backgroundColor: '#1A1A1A', borderRadius: 10, padding: 10, marginBottom: 10, alignItems: 'center', borderColor: '#00BFA5', borderWidth: 1 },
@@ -254,7 +254,6 @@ const styles = StyleSheet.create({
   cardMain: { flex: 1, flexDirection: 'row', padding: 10 },
   thumb: { width: 120, height: 68, borderRadius: 6, backgroundColor: '#333' },
   
-  // অডিওর হাফ থাম্বনেইল স্টাইল
   splitThumbContainer: { width: 120, height: 68, borderRadius: 6, backgroundColor: '#222', flexDirection: 'row', overflow: 'hidden' },
   halfThumb: { width: '50%', height: '100%', backgroundColor: '#333' },
   halfIcon: { width: '50%', height: '100%', alignItems: 'center', justifyContent: 'center' },
