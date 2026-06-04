@@ -4,6 +4,13 @@ import { View, Text, ScrollView } from 'react-native';
 import { registerRootComponent } from 'expo';
 import App from './App';
 
+// MessageQueue বাইপাস করার জন্য Polyfill (Expo Go ক্র্যাশ ফিক্স)
+if (!global.MessageQueue) {
+  global.MessageQueue = {
+    spy: () => {},
+  };
+}
+
 // ১. রিয়্যাক্ট এরর বাউন্ডারি (স্ক্রিনে পুরো এরর দেখানোর জন্য)
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -18,16 +25,16 @@ class ErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <View style={{ flex: 1, backgroundColor: '#8B0000', padding: 20, paddingTop: 60 }}>
-          <Text style={{ fontSize: 24, color: 'white', fontWeight: 'bold' }}>🔴 স্টার্টআপ ক্র্যাশ!</Text>
-          <Text style={{ fontSize: 16, color: 'white', marginTop: 10, marginBottom: 20 }}>
-            নিচের সম্পূর্ণ লগটি পড়ুন বা স্ক্রিনশট নিন:
+        <View style={{ flex: 1, backgroundColor: '#8B0000', paddingTop: 50, padding: 20 }}>
+          <Text style={{ fontSize: 24, color: 'white', fontWeight: 'bold' }}>App Crashed!</Text>
+          <Text style={{ fontSize: 16, color: 'white', marginVertical: 10 }}>
+            নিচের সম্পূর্ণ লগটি পড়ুন বা স্ক্রিনশট নিন:
           </Text>
-          
-          {/* স্ক্রল করে পুরো এরর পড়ার ব্যবস্থা */}
-          <ScrollView style={{ backgroundColor: 'black', padding: 15, borderRadius: 10 }}>
-            <Text style={{ color: '#00FF00', fontSize: 13, lineHeight: 20 }}>
-              {this.state.error ? `${this.state.error.message}\n\n${this.state.error.stack}` : 'অজানা এরর!'}
+
+          {/* স্ক্রল করে পুরো এরর পড়ার ব্যবস্থা */}
+          <ScrollView style={{ backgroundColor: 'black', padding: 10, borderRadius: 5 }}>
+            <Text style={{ color: '#00FF00', fontSize: 13 }}>
+              {this.state.error ? `${this.state.error.message}\n\n${this.state.error.stack}` : 'Unknown Error'}
             </Text>
           </ScrollView>
         </View>
@@ -44,7 +51,7 @@ global.ErrorUtils.setGlobalHandler((error, isFatal) => {
   }
 });
 
-// মূল অ্যাপকে এরর বাউন্ডারি দিয়ে মুড়ে দেওয়া হলো
+// মূল অ্যাপকে এরর বাউন্ডারি দিয়ে মুড়ে দেওয়া হলো
 const MyTubeRoot = () => (
   <ErrorBoundary>
     <App />
