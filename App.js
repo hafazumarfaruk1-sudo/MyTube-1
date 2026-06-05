@@ -22,7 +22,7 @@ import livescreen from './Screens/livescreen'; // আপনার কমিট �
 // ==========================================
 import SettingsScreen from './Settings/SettingsScreen';
 import HistoryPage from './Settings/HistoryPage';
-import downloadscreen from './Settings/downloadscreen'; // আপনার কমিট অনুযায়ী হুবহু রাখা হলো
+//import downloadscreen from './Settings/downloadscreen'; // আপনার কমিট অনুযায়ী হুবহু রাখা হলো
 import SearchSetting from './Settings/searchsetting';
 import GlobalPlayer from './Settings/GlobalPlayer'; // ফ্লোটিং প্লেয়ার ইমপোর্ট
 
