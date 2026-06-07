@@ -448,38 +448,30 @@ export default function GlobalPlayer() {
       setShowSettingsMenu(false);
   };
 
-  // 🚨 [FIXED AI LOADER] - মডেল ডিভাইসের লোকাল মেমরিতে ডাউনলোড করে সেখান থেকে রিড করা হচ্ছে
   const loadGenderModelAsync = async () => {
       if (!genderModelRef.current) {
           try {
-              // ১. এক্সপোর মাধ্যমে মডেল অ্যাসেট লোড করা
               const modelAsset = Asset.fromModule(require('../assets/gender_classification.tflite'));
               await modelAsset.downloadAsync();
               let modelUri = modelAsset.localUri || modelAsset.uri;
 
-              // ২. ডিভাইসের লোকাল মেমরি ডিরেক্টরি সেট করা
               const localFilePath = FileSystem.documentDirectory + 'gender_model.tflite';
 
-              // ৩. যদি আগের কোনো ক্র্যাশ করা ফাইল থাকে, সেটি ডিলিট করা
               const fileInfo = await FileSystem.getInfoAsync(localFilePath);
               if (fileInfo.exists) {
                   await FileSystem.deleteAsync(localFilePath);
               }
 
-              // ৪. যদি সার্ভারের লিংক হয়, তবে ডাউনলোড করে মেমরিতে সেভ করা
               if (modelUri.startsWith('http')) {
                   const downloadRes = await FileSystem.downloadAsync(modelUri, localFilePath);
                   modelUri = downloadRes.uri;
               } else {
-                  // আগে থেকেই লোকাল হলে মেমরিতে কপি করা
                   await FileSystem.copyAsync({ from: modelUri, to: localFilePath });
                   modelUri = localFilePath;
               }
 
-              // ৫. TFLite C++ ইঞ্জিনের জন্য 'file://' লেখাটি কেটে পারফেক্ট পাথ তৈরি করা
               const cleanPath = modelUri.replace('file://', '');
 
-              // ৬. ফাইনালি মেমরি থেকে মডেল রান করা
               genderModelRef.current = await loadTensorflowModel(cleanPath);
               console.log("AI Model Loaded Perfectly from Memory: ", cleanPath);
 
@@ -544,15 +536,22 @@ export default function GlobalPlayer() {
       }
   };
 
+  // 🚨 [NEW] ডিটেকটিভ লগস সহ আপডেটেড AI ফাংশন
   const runSafeViewingAI = async (timeInSeconds, vUrl) => {
       isAiProcessingRef.current = true;
+      console.log(`\n--- 🤖 AI CHECK AT ${timeInSeconds.toFixed(1)}s ---`);
+      
       try {
+          // ১. থাম্বনেইল কাটা
           const { uri } = await VideoThumbnails.getThumbnailAsync(vUrl, {
               time: Math.floor(timeInSeconds * 1000), 
               quality: 0.3, 
           });
+          console.log("📸 Thumbnail Captured: Success");
 
+          // ২. ফেস ডিটেকশন
           const faces = await detectFacesWithMLKit(uri);
+          console.log(`👤 Faces Detected: ${faces.length}`);
 
           if (faces && faces.length > 0) {
               const face = faces[0];
@@ -564,21 +563,28 @@ export default function GlobalPlayer() {
               const height = box.height ?? 0;
               
               if (width > 0 && height > 0) {
+                  // ৩. ফেস ক্রপ করা
                   const croppedFace = await ImageManipulator.manipulateAsync(
                       uri,
                       [{ crop: { originX, originY, width, height } }],
                       { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
                   );
+                  console.log("✂️ Face Cropped: Success");
 
+                  // ৪. মডেল চেক করা
                   const isFemale = await checkGenderWithTFLite(croppedFace.uri);
+                  console.log(`🛑 Final Decision: Blur = ${isFemale}`);
+                  
                   setIsBlurred(isFemale); 
               } else {
+                  console.log("⚠️ Face Box Invalid (Width/Height 0)");
                   setIsBlurred(false);
               }
           } else {
               setIsBlurred(false); 
           }
       } catch (error) {
+          console.log("❌ AI Pipeline Error: ", error.message || error);
           setIsBlurred(false);
       } finally {
           isAiProcessingRef.current = false; 
