@@ -18,8 +18,6 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer'; 
 import * as jpeg from 'jpeg-js';
-
-// 👈 ML Kit-এর আপডেটেড ইম্পোর্ট
 import FaceDetection from '@react-native-ml-kit/face-detection';
 import { loadTensorflowModel } from 'react-native-fast-tflite';
 
@@ -35,7 +33,15 @@ const MINI_HEIGHT = (MINI_WIDTH * 9) / 16;
 
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
 
-// সেফটি ফাংশন
+// 🚨 [NEW] সেফটি ফাংশন (মেমরি লিক ও ক্র্যাশ রোধ করার জন্য)
+const safePlay = (p) => {
+    try { if (p && typeof p.play === 'function') { const res = p.play(); if (res && res.catch) res.catch(()=>{}); } } catch(e){}
+};
+
+const safePause = (p) => {
+    try { if (p && typeof p.pause === 'function') { const res = p.pause(); if (res && res.catch) res.catch(()=>{}); } } catch(e){}
+};
+
 const safeSeek = (p, targetSec) => {
     if (!p) return;
     try {
@@ -299,7 +305,7 @@ export default function GlobalPlayer() {
 
       if (mode) {
           resumeTimeRef.current = player ? player.currentTime : currentTime;
-          if (player) player.pause();
+          safePause(player); // 👈 Updated
           setIsPlayingUI(true); 
 
           let audioUrlToPlay = cachedAudioUrlRef.current;
@@ -321,7 +327,7 @@ export default function GlobalPlayer() {
           }
       } else {
           resumeTimeRef.current = player ? player.currentTime : currentTime;
-          if (player) player.pause();
+          safePause(player); // 👈 Updated
           
           setVideoSource(streamUrl); 
 
@@ -347,7 +353,7 @@ export default function GlobalPlayer() {
                   if (resumeTimeRef.current > 0) {
                       safeSeek(player, resumeTimeRef.current);
                   }
-                  player.play();
+                  safePlay(player); // 👈 Updated
 
                   if (!isAudioMode && streamModeRef.current === 'separate' && syncAudioRef.current) {
                       safeSeek(syncAudioRef.current, resumeTimeRef.current); 
@@ -453,7 +459,6 @@ export default function GlobalPlayer() {
       }
   };
 
-  // 👈 আপডেটেড ML Kit ডিটেকশন ফাংশন
   const detectFacesWithMLKit = async (uri) => {
       try {
           const faces = await FaceDetection.detect(uri, {
@@ -464,7 +469,6 @@ export default function GlobalPlayer() {
           });
           return faces;
       } catch (error) {
-          console.log("ML Kit Inference Error: ", error);
           return [];
       }
   };
@@ -513,7 +517,6 @@ export default function GlobalPlayer() {
   const runSafeViewingAI = async (timeInSeconds, vUrl) => {
       isAiProcessingRef.current = true;
       try {
-          // 👈 থাম্বনেইল কোয়ালিটি 0.5 থেকে কমিয়ে 0.3 করা হয়েছে
           const { uri } = await VideoThumbnails.getThumbnailAsync(vUrl, {
               time: Math.floor(timeInSeconds * 1000), 
               quality: 0.3, 
@@ -522,23 +525,33 @@ export default function GlobalPlayer() {
           const faces = await detectFacesWithMLKit(uri);
 
           if (faces && faces.length > 0) {
-              const bounds = faces[0].bounds;
-              const originX = Math.max(0, bounds.left || bounds.originX || 0);
-              const originY = Math.max(0, bounds.top || bounds.originY || 0);
+              const face = faces[0];
+              // 🚨 [FIXED] এখানে frame বা bounds যা-ই আসুক, এটি হ্যান্ডেল করতে পারবে
+              const box = face.frame || face.bounds || {}; 
               
-              const croppedFace = await ImageManipulator.manipulateAsync(
-                  uri,
-                  [{ crop: { originX, originY, width: bounds.width, height: bounds.height } }],
-                  { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
-              );
+              const originX = Math.max(0, box.left ?? box.x ?? box.originX ?? 0);
+              const originY = Math.max(0, box.top ?? box.y ?? box.originY ?? 0);
+              const width = box.width ?? 0;
+              const height = box.height ?? 0;
+              
+              // 🚨 [FIXED] ভ্যালিড হাইট এবং উইডথ না পেলে ক্রপ করবে না
+              if (width > 0 && height > 0) {
+                  const croppedFace = await ImageManipulator.manipulateAsync(
+                      uri,
+                      [{ crop: { originX, originY, width, height } }],
+                      { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+                  );
 
-              const isFemale = await checkGenderWithTFLite(croppedFace.uri);
-              setIsBlurred(isFemale); 
+                  const isFemale = await checkGenderWithTFLite(croppedFace.uri);
+                  setIsBlurred(isFemale); 
+              } else {
+                  setIsBlurred(false);
+              }
           } else {
               setIsBlurred(false); 
           }
       } catch (error) {
-          console.log("AI Smart Filtering Loop Error: ", error);
+          // সাইলেন্ট ইগনোর: থাম্বনেইল বা ক্রপ এরর হলে কনসোল স্প্যাম করবে না
           setIsBlurred(false);
       } finally {
           isAiProcessingRef.current = false; 
@@ -558,18 +571,23 @@ export default function GlobalPlayer() {
                     safeSeek(player, pendingSeekRef.current);
                     setCurrentTime(pendingSeekRef.current);
                     pendingSeekRef.current = null;
-                } else if (!isSlidingRef.current && (player.currentTime > 0 || player.playing)) {
-                    setCurrentTime(player.currentTime);
-                    if (player.duration > 0) setDuration(player.duration);
-                    
-                    // 🚨 [REAL TIME AI TRIGGER LOGIC] 
-                    if (videoSource && !isAudioMode) {
-                        const currentSec = player.currentTime;
-                        if (Math.abs(currentSec - lastAiCheckTimeRef.current) >= 2 && !isAiProcessingRef.current) {
-                            lastAiCheckTimeRef.current = currentSec;
-                            runSafeViewingAI(currentSec, videoSource);
+                } else if (!isSlidingRef.current) {
+                    // Try catch যুক্ত করা হয়েছে Released Player Error এড়ানোর জন্য
+                    try {
+                        if (player.currentTime > 0 || player.playing) {
+                            setCurrentTime(player.currentTime);
+                            if (player.duration > 0) setDuration(player.duration);
+                            
+                            // 🚨 [REAL TIME AI TRIGGER LOGIC] 
+                            if (videoSource && !isAudioMode) {
+                                const currentSec = player.currentTime;
+                                if (Math.abs(currentSec - lastAiCheckTimeRef.current) >= 2 && !isAiProcessingRef.current) {
+                                    lastAiCheckTimeRef.current = currentSec;
+                                    runSafeViewingAI(currentSec, videoSource);
+                                }
+                            }
                         }
-                    }
+                    } catch(e) {}
                 }
             }
 
@@ -678,7 +696,7 @@ export default function GlobalPlayer() {
       if (isFullscreen) await toggleFullscreen();
       setStreamUrl(null);
       setVideoSource(null); 
-      if (player) player.pause();
+      safePause(player); // 👈 Updated
       safeReleaseAudio();
       setIsBlurred(false); 
   };
@@ -766,10 +784,10 @@ export default function GlobalPlayer() {
                 <TouchableOpacity onPress={async () => {
                     if (player) {
                         if (player.playing) {
-                            player.pause();
+                            safePause(player); // 👈 Updated
                             if (!isAudioMode && streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.pause();
                         } else {
-                            player.play();
+                            safePlay(player); // 👈 Updated
                             if (!isAudioMode && streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.play();
                         }
                     }
@@ -916,10 +934,10 @@ export default function GlobalPlayer() {
                     <TouchableOpacity style={styles.miniCtrlBtn} onPress={async () => {
                         if (player) {
                             if (player.playing) {
-                                player.pause();
+                                safePause(player); // 👈 Updated
                                 if (!isAudioMode && streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.pause();
                             } else {
-                                player.play();
+                                safePlay(player); // 👈 Updated
                                 if (!isAudioMode && streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.play();
                             }
                         }
