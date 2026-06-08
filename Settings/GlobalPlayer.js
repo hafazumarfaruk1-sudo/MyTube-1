@@ -94,7 +94,6 @@ export default function GlobalPlayer() {
 
   // 🚨 [REAL AI STATES]
   const [isBlurred, setIsBlurred] = useState(false);
-  // 👈 নতুন: এআইয়ের চোখ (Debug Window)
   const [aiVisionImage, setAiVisionImage] = useState(null); 
   
   const isAiProcessingRef = useRef(false);
@@ -215,7 +214,7 @@ export default function GlobalPlayer() {
       cachedAudioUrlRef.current = null; pendingSeekRef.current = null;
       
       setIsBlurred(false); 
-      setAiVisionImage(null); // রিসেট
+      setAiVisionImage(null); 
       isAiProcessingRef.current = false;
       lastAiCheckTimeRef.current = 0;
 
@@ -372,6 +371,7 @@ export default function GlobalPlayer() {
           const output = await genderModelRef.current.run([rgbPixels]);
           if (output && output[0] && output[0].length > 0) {
               const probability = output[0][0];
+              console.log(`Female Probability: ${probability.toFixed(3)}`);
               return probability > 0.5; 
           }
           return false;
@@ -388,10 +388,10 @@ export default function GlobalPlayer() {
               quality: 0.8,
           });
 
-          // 🚨 [DEBUG] স্ক্রিনশটটি ইউজারকে দেখানোর জন্য সেভ করা হলো
           setAiVisionImage(uri);
 
           const faces = await detectFacesWithMLKit(uri);
+          console.log(`👤 Faces found: ${faces.length}`);
 
           if (faces && faces.length > 0) {
               const face = faces[0];
@@ -556,7 +556,13 @@ export default function GlobalPlayer() {
             <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
                 {videoSource ? (
                     <>
-                        <View ref={snapshotRef} collapsable={false} style={styles.video}>
+                        {/* 🚨 [MODIFIED] হার্ডওয়্যার অ্যাক্সিলারেশন বন্ধ করে Texture Render করার কমান্ড */}
+                        <View 
+                            ref={snapshotRef} 
+                            collapsable={false} 
+                            renderToHardwareTextureAndroid={true} 
+                            style={styles.video}
+                        >
                             <VideoView player={player} style={styles.video} contentFit="contain" nativeControls={false} allowsPictureInPicture />
                         </View>
                         
@@ -564,7 +570,6 @@ export default function GlobalPlayer() {
                             <BlurView intensity={100} tint="dark" style={StyleSheet.absoluteFillObject} />
                         )}
 
-                        {/* 🚨 [DEBUG WINDOW] - এআই ঠিক কী দেখতে পাচ্ছে তা এখানে দেখা যাবে */}
                         {aiVisionImage && isInteractiveFull && (
                             <View style={styles.debugWindow}>
                                 <Image source={{ uri: aiVisionImage }} style={{ flex: 1, width: '100%', height: '100%' }} resizeMode="contain" />
@@ -716,8 +721,6 @@ const styles = StyleSheet.create({
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' }, settingsMenu: { width: 250, backgroundColor: '#1A1A1A', borderRadius: 15, padding: 15, elevation: 10 }, modalTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 10, textAlign: 'center', borderBottomWidth: 1, borderBottomColor: '#333', paddingBottom: 10 }, menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#333' }, menuIcon: { marginRight: 10 }, menuText: { color: '#FFF', fontSize: 16 },
   fallbackOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center', padding: 20, zIndex: 30 }, fallbackText: { color: '#FFF', textAlign: 'center', marginVertical: 20, fontSize: 16 }, btn: { backgroundColor: '#FF0000', paddingHorizontal: 25, paddingVertical: 12, borderRadius: 10 }, btnText: { color: '#FFF', fontWeight: 'bold' },
   miniTouchableArea: { flex: 1, width: '100%', height: '100%', position: 'absolute', zIndex: 50 }, miniControlsRow: { position: 'absolute', top: 5, right: 5, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 15, paddingHorizontal: 5, paddingVertical: 2, alignItems: 'center' }, miniCtrlBtn: { padding: 5, marginHorizontal: 3 },
-  
-  // 👈 নতুন স্টাইল
   debugWindow: { position: 'absolute', top: 80, right: 20, width: 100, height: 150, backgroundColor: '#000', borderWidth: 2, borderColor: '#FF0000', zIndex: 100, elevation: 10 },
   debugText: { color: '#FFF', fontSize: 10, fontWeight: 'bold', textAlign: 'center', backgroundColor: '#FF0000', padding: 2 }
 });
