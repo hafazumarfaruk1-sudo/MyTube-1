@@ -17,13 +17,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BlurView } from 'expo-blur';
 import { captureRef } from 'react-native-view-shot'; 
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as FileSystem from 'expo-file-system'; // শুধু ছবি রিড করার জন্য লাগবে
+import * as FileSystem from 'expo-file-system'; 
 import { decode } from 'base64-arraybuffer'; 
 import * as jpeg from 'jpeg-js';
+import { Asset } from 'expo-asset'; // 👈 লোকাল ক্যাশ জেনারেট করার জন্য আবশ্যক
 import FaceDetection from '@react-native-ml-kit/face-detection';
 import { loadTensorflowModel } from 'react-native-fast-tflite';
 
-LogBox.ignoreLogs(['Video component', 'expo-audio', 'expo-video', 'InteractionManager']);
+LogBox.ignoreLogs(['Video component', 'expo-audio', 'expo-video', 'InteractionManager', 'SafeAreaView']);
 
 const windowDim = Dimensions.get('window');
 const PORTRAIT_WIDTH = Math.min(windowDim.width, windowDim.height);
@@ -322,12 +323,24 @@ export default function GlobalPlayer() {
       setShowSpeedMenu(false); setShowSettingsMenu(false);
   };
 
-  // 🚨 [ULTIMATE FIX] - FileSystem ঝামেলা ছাড়াই সরাসরি Assets থেকে মডেল লোড
+  // 🚨 [FIXED AI FUNCTION] - এক্সপো ক্যাশ ব্যবহার করে ডাইনামিক লোকাল পাথ তৈরি লজিক
   const loadGenderModelAsync = async () => {
       if (!genderModelRef.current) {
           try {
-              genderModelRef.current = await loadTensorflowModel(require('../assets/gender_classification.tflite'));
-              console.log("✅ Model Loaded Perfectly from Assets!");
+              console.log("Loading Tensorflow Lite Model...");
+              const asset = Asset.fromModule(require('../assets/gender_classification.tflite'));
+              
+              // মেট্রোর অনলাইন পাথকে লোকাল স্টোরেজে ডাউনলোড করা হচ্ছে
+              await asset.downloadAsync();
+              let localPath = asset.localUri || asset.uri;
+              
+              // অ্যান্ড্রয়েড C++ ইঞ্জিনের জন্য file:// পার্ট কেটে ফেলা হলো
+              if (localPath.startsWith('file://')) {
+                  localPath = localPath.replace('file://', '');
+              }
+              
+              genderModelRef.current = await loadTensorflowModel(localPath);
+              console.log("✅ Model Loaded Successfully from Local Cache!");
           } catch (e) { 
               console.log("Model Loading Failure:", e); 
           }
@@ -384,7 +397,6 @@ export default function GlobalPlayer() {
               quality: 0.8,
           });
 
-          // 🚨 [DEBUG] স্ক্রিনশট ইউজারকে দেখানো (পরে মুছে ফেলতে পারেন)
           setAiVisionImage(uri);
 
           const faces = await detectFacesWithMLKit(uri);
@@ -554,7 +566,7 @@ export default function GlobalPlayer() {
             <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
                 {videoSource ? (
                     <>
-                        {/* 🚨 surfaceType="textureView" - কালো স্ক্রিন সমাধানকারী ম্যাজিক প্রপ */}
+                        {/* 🚨 surfaceType="textureView" - কাল পর্দা সমাধানকারী ট্রিক */}
                         <View ref={snapshotRef} collapsable={false} style={styles.video}>
                             <VideoView 
                                 player={player} 
@@ -570,7 +582,7 @@ export default function GlobalPlayer() {
                             <BlurView intensity={100} tint="dark" style={StyleSheet.absoluteFillObject} />
                         )}
 
-                        {/* 🤖 এআইয়ের চোখ (টেস্টিং শেষ হলে মুছে দিতে পারেন) */}
+                        {/* 🤖 এআইয়ের চোখ (Debug Window) */}
                         {aiVisionImage && isInteractiveFull && (
                             <View style={styles.debugWindow}>
                                 <Image source={{ uri: aiVisionImage }} style={{ flex: 1, width: '100%', height: '100%' }} resizeMode="contain" />
