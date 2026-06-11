@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking, AppState, Image, Platform } from 'react-native';
 
-// 🚨 [LATEST PACKAGES] expo-video এবং expo-audio
+// 🚨 [LATEST PACKAGES]
 import { useVideoPlayer, VideoView } from 'expo-video'; 
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio'; 
 import { Ionicons } from '@expo/vector-icons';
@@ -17,10 +17,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BlurView } from 'expo-blur';
 import { captureRef } from 'react-native-view-shot'; 
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from 'expo-file-system'; // শুধু ছবি রিড করার জন্য লাগবে
 import { decode } from 'base64-arraybuffer'; 
 import * as jpeg from 'jpeg-js';
-import { Asset } from 'expo-asset'; 
 import FaceDetection from '@react-native-ml-kit/face-detection';
 import { loadTensorflowModel } from 'react-native-fast-tflite';
 
@@ -36,7 +35,7 @@ const MINI_HEIGHT = (MINI_WIDTH * 9) / 16;
 
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
 
-// 🚨 সেফটি ফাংশন (expo-video এবং expo-audio এর জন্য আপডেট করা)
+// 🚨 সেফটি ফাংশন 
 const safePlay = (p) => { try { if (p && typeof p.play === 'function') { const res = p.play(); if (res && res.catch) res.catch(()=>{}); } } catch(e){} };
 const safePause = (p) => { try { if (p && typeof p.pause === 'function') { const res = p.pause(); if (res && res.catch) res.catch(()=>{}); } } catch(e){} };
 const safeSeek = (p, targetSec) => { if (!p) return; try { if (typeof p.seekTo === 'function') p.seekTo(targetSec); else if (typeof p.seekBy === 'function') p.seekBy(targetSec - p.currentTime); else p.currentTime = targetSec; } catch (e) {} };
@@ -323,29 +322,12 @@ export default function GlobalPlayer() {
       setShowSpeedMenu(false); setShowSettingsMenu(false);
   };
 
-  // 🚨 [FIXED] getInfoAsync-এর ওয়ার্নিং সমাধান করা হলো
+  // 🚨 [ULTIMATE FIX] - FileSystem ঝামেলা ছাড়াই সরাসরি Assets থেকে মডেল লোড
   const loadGenderModelAsync = async () => {
       if (!genderModelRef.current) {
           try {
-              const modelAsset = Asset.fromModule(require('../assets/gender_classification.tflite'));
-              await modelAsset.downloadAsync();
-              let modelUri = modelAsset.localUri || modelAsset.uri;
-              const localFilePath = FileSystem.documentDirectory + 'gender_model.tflite';
-              
-              try {
-                  await FileSystem.deleteAsync(localFilePath, { idempotent: true });
-              } catch(e) {}
-
-              if (modelUri.startsWith('http')) {
-                  const downloadRes = await FileSystem.downloadAsync(modelUri, localFilePath); 
-                  modelUri = downloadRes.uri;
-              } else {
-                  await FileSystem.copyAsync({ from: modelUri, to: localFilePath }); 
-                  modelUri = localFilePath;
-              }
-              const cleanPath = modelUri.replace('file://', '');
-              genderModelRef.current = await loadTensorflowModel(cleanPath);
-              console.log("✅ Model Loaded Perfectly from Memory");
+              genderModelRef.current = await loadTensorflowModel(require('../assets/gender_classification.tflite'));
+              console.log("✅ Model Loaded Perfectly from Assets!");
           } catch (e) { 
               console.log("Model Loading Failure:", e); 
           }
@@ -381,11 +363,14 @@ export default function GlobalPlayer() {
           const output = await genderModelRef.current.run([rgbPixels]);
           if (output && output[0] && output[0].length > 0) {
               const probability = output[0][0];
-              console.log(`Female Probability: ${probability.toFixed(3)}`);
+              console.log(`👩 Female Probability: ${probability.toFixed(3)}`);
               return probability > 0.5; 
           }
           return false;
-      } catch (error) { return false; }
+      } catch (error) { 
+          console.log("TFLite Checking Error:", error);
+          return false; 
+      }
   };
 
   const runRealTimeAI = async (timeInSeconds) => {
@@ -393,11 +378,13 @@ export default function GlobalPlayer() {
       isAiProcessingRef.current = true;
       
       try {
+          // 📸 জিরো-ল্যাগ স্ক্রিনশট 
           const uri = await captureRef(snapshotRef, {
               format: 'jpg',
               quality: 0.8,
           });
 
+          // 🚨 [DEBUG] স্ক্রিনশট ইউজারকে দেখানো (পরে মুছে ফেলতে পারেন)
           setAiVisionImage(uri);
 
           const faces = await detectFacesWithMLKit(uri);
@@ -450,6 +437,7 @@ export default function GlobalPlayer() {
                             setCurrentTime(player.currentTime);
                             if (player.duration > 0) setDuration(player.duration);
                             
+                            // 🤖 ৩ সেকেন্ড পরপর এআই চেক 
                             if (videoSource && !isAudioMode && player.playing) {
                                 const currentSec = player.currentTime;
                                 if (Math.abs(currentSec - lastAiCheckTimeRef.current) >= 3 && !isAiProcessingRef.current) {
@@ -566,7 +554,7 @@ export default function GlobalPlayer() {
             <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
                 {videoSource ? (
                     <>
-                        {/* 🚨 [THE ULTIMATE FIX] - surfaceType="textureView" দেওয়া হলো! */}
+                        {/* 🚨 surfaceType="textureView" - কালো স্ক্রিন সমাধানকারী ম্যাজিক প্রপ */}
                         <View ref={snapshotRef} collapsable={false} style={styles.video}>
                             <VideoView 
                                 player={player} 
@@ -582,7 +570,7 @@ export default function GlobalPlayer() {
                             <BlurView intensity={100} tint="dark" style={StyleSheet.absoluteFillObject} />
                         )}
 
-                        {/* 🚨 [DEBUG WINDOW] */}
+                        {/* 🤖 এআইয়ের চোখ (টেস্টিং শেষ হলে মুছে দিতে পারেন) */}
                         {aiVisionImage && isInteractiveFull && (
                             <View style={styles.debugWindow}>
                                 <Image source={{ uri: aiVisionImage }} style={{ flex: 1, width: '100%', height: '100%' }} resizeMode="contain" />
