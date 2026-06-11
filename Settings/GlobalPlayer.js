@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking, AppState, Image, Platform } from 'react-native';
 
-// 🚨 [MODIFIED] শুধুমাত্র নতুন expo-video এবং expo-audio ব্যবহার করা হলো
+// 🚨 [LATEST PACKAGES] expo-video এবং expo-audio
 import { useVideoPlayer, VideoView } from 'expo-video'; 
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio'; 
 import { Ionicons } from '@expo/vector-icons';
@@ -323,6 +323,7 @@ export default function GlobalPlayer() {
       setShowSpeedMenu(false); setShowSettingsMenu(false);
   };
 
+  // 🚨 [FIXED] getInfoAsync-এর ওয়ার্নিং সমাধান করা হলো
   const loadGenderModelAsync = async () => {
       if (!genderModelRef.current) {
           try {
@@ -330,18 +331,24 @@ export default function GlobalPlayer() {
               await modelAsset.downloadAsync();
               let modelUri = modelAsset.localUri || modelAsset.uri;
               const localFilePath = FileSystem.documentDirectory + 'gender_model.tflite';
-              const fileInfo = await FileSystem.getInfoAsync(localFilePath);
-              if (fileInfo.exists) await FileSystem.deleteAsync(localFilePath);
+              
+              try {
+                  await FileSystem.deleteAsync(localFilePath, { idempotent: true });
+              } catch(e) {}
 
               if (modelUri.startsWith('http')) {
-                  const downloadRes = await FileSystem.downloadAsync(modelUri, localFilePath); modelUri = downloadRes.uri;
+                  const downloadRes = await FileSystem.downloadAsync(modelUri, localFilePath); 
+                  modelUri = downloadRes.uri;
               } else {
-                  await FileSystem.copyAsync({ from: modelUri, to: localFilePath }); modelUri = localFilePath;
+                  await FileSystem.copyAsync({ from: modelUri, to: localFilePath }); 
+                  modelUri = localFilePath;
               }
               const cleanPath = modelUri.replace('file://', '');
               genderModelRef.current = await loadTensorflowModel(cleanPath);
               console.log("✅ Model Loaded Perfectly from Memory");
-          } catch (e) { console.log("Model Loading Failure:", e); }
+          } catch (e) { 
+              console.log("Model Loading Failure:", e); 
+          }
       }
   };
 
@@ -386,13 +393,11 @@ export default function GlobalPlayer() {
       isAiProcessingRef.current = true;
       
       try {
-          // 📸 জিরো-ল্যাগ স্ক্রিনশট 
           const uri = await captureRef(snapshotRef, {
               format: 'jpg',
               quality: 0.8,
           });
 
-          // 🚨 [DEBUG] স্ক্রিনশট ইউজারকে দেখানো
           setAiVisionImage(uri);
 
           const faces = await detectFacesWithMLKit(uri);
@@ -569,7 +574,7 @@ export default function GlobalPlayer() {
                                 contentFit="contain" 
                                 nativeControls={false} 
                                 allowsPictureInPicture 
-                                surfaceType="textureView"   /* 👈 ম্যাজিক প্রপ যা কালো স্ক্রিন সরিয়ে দেবে */
+                                surfaceType="textureView"   
                             />
                         </View>
                         
