@@ -94,6 +94,7 @@ export default function GlobalPlayer() {
   const isSyncingRef = useRef(false);
   const pendingSeekRef = useRef(null); 
 
+  // 🚨 [REAL AI STATES]
   const [isBlurred, setIsBlurred] = useState(false);
   const [aiVisionImage, setAiVisionImage] = useState(null); 
   
@@ -321,20 +322,19 @@ export default function GlobalPlayer() {
       setShowSpeedMenu(false); setShowSettingsMenu(false);
   };
 
-  // 🚨 [OFFICIAL FIX] - react-native-fast-tflite এর ডকুমেন্টেশন অনুযায়ী { url: ... } অবজেক্ট পাঠানো হলো
+  // 🚨 [THE HOLY GRAIL FIX] - C++ Nitro Engine এর ক্র্যাশ সমাধান
   const loadGenderModelAsync = async () => {
       if (!genderModelRef.current) {
           try {
               console.log("Loading Tensorflow Lite Model...");
               const asset = Asset.fromModule(require('../assets/gender_classification.tflite'));
-              
               await asset.downloadAsync();
               
-              // লোকাল পাথটি বের করা হলো (যাতে file:// থাকে, কারণ এটি URL হিসেবে যাবে)
               const localUri = asset.localUri || asset.uri;
               
-              // 🚨 ম্যাজিক লাইন: স্ট্রিং এর বদলে অবজেক্ট { url: localUri } দেওয়া হলো
-              genderModelRef.current = await loadTensorflowModel({ url: localUri });
+              // 1. { url: localUri } = JS ভ্যালিডেশন বাইপাস করার জন্য
+              // 2. [] = C++ Nitro Engine এর Value is undefined ক্র্যাশ ঠেকানোর জন্য
+              genderModelRef.current = await loadTensorflowModel({ url: localUri }, []);
               
               console.log("✅ Model Loaded Successfully from Local Cache!");
           } catch (e) { 
@@ -387,6 +387,7 @@ export default function GlobalPlayer() {
       isAiProcessingRef.current = true;
       
       try {
+          // 📸 জিরো-ল্যাগ স্ক্রিনশট 
           const uri = await captureRef(snapshotRef, {
               format: 'jpg',
               quality: 0.8,
@@ -444,6 +445,7 @@ export default function GlobalPlayer() {
                             setCurrentTime(player.currentTime);
                             if (player.duration > 0) setDuration(player.duration);
                             
+                            // 🤖 ৩ সেকেন্ড পরপর এআই চেক 
                             if (videoSource && !isAudioMode && player.playing) {
                                 const currentSec = player.currentTime;
                                 if (Math.abs(currentSec - lastAiCheckTimeRef.current) >= 3 && !isAiProcessingRef.current) {
@@ -560,6 +562,7 @@ export default function GlobalPlayer() {
             <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
                 {videoSource ? (
                     <>
+                        {/* 🚨 surfaceType="textureView" - কাল পর্দা সমাধানকারী ট্রিক */}
                         <View ref={snapshotRef} collapsable={false} style={styles.video}>
                             <VideoView 
                                 player={player} 
@@ -575,6 +578,7 @@ export default function GlobalPlayer() {
                             <BlurView intensity={100} tint="dark" style={StyleSheet.absoluteFillObject} />
                         )}
 
+                        {/* 🤖 এআইয়ের চোখ (Debug Window) */}
                         {aiVisionImage && isInteractiveFull && (
                             <View style={styles.debugWindow}>
                                 <Image source={{ uri: aiVisionImage }} style={{ flex: 1, width: '100%', height: '100%' }} resizeMode="contain" />
