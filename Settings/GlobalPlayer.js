@@ -362,12 +362,13 @@ export default function GlobalPlayer() {
               rgbPixels[rgbIndex++] = rawImageData.data[i + 2] / 255.0; 
           }
 
-          const output = await genderModelRef.current.run([[rgbPixels.buffer]]);
-          
-          // 🚨 [BULLETPROOF FIX] - মডেলের রেজাল্ট যেভাবেই আসুক, এটি নিখুঁতভাবে বের করে আনবে
+          // 🚨 [THE MAGIC FIX] - আমি তিনবার চেক করে ডাবল ব্র্যাকেট সরিয়ে দিয়েছি!
+          const output = await genderModelRef.current.run([rgbPixels.buffer]);
+
           let probability = 0;
 
-          if (output && Array.isArray(output) && output.length > 0) {
+          // 🚨 [BULLETPROOF OUTPUT PARSING]
+          if (output && output.length > 0) {
               const firstTensor = output[0];
               
               if (typeof firstTensor === 'number') {
@@ -377,19 +378,16 @@ export default function GlobalPlayer() {
               }
           }
 
-          // যদি মডেলের আউটপুট ০-২৫৫ রেঞ্জে আসে (Uint8), তবে তাকে ০-১ এর মধ্যে আনা হলো
           if (probability > 1) {
               probability = probability / 255.0;
           }
 
-          // যদি কোনো কারণে Probability undefined হয়ে যায়, তাকে ডিফল্টভাবে ০ ধরা হবে
           if (typeof probability !== 'number' || isNaN(probability)) {
               probability = 0;
           }
 
           console.log(`👩 Female Probability: ${probability.toFixed(3)}`);
           
-          // 🚨 থ্রেশহোল্ড সেট করা হলো (০.২ এর উপরে গেলেই ব্লার হবে)
           return probability > 0.2; 
           
       } catch (error) { 
@@ -579,7 +577,6 @@ export default function GlobalPlayer() {
             <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
                 {videoSource ? (
                     <>
-                        {/* 🚨 surfaceType="textureView" */}
                         <View ref={snapshotRef} collapsable={false} style={styles.video}>
                             <VideoView 
                                 player={player} 
@@ -591,12 +588,10 @@ export default function GlobalPlayer() {
                             />
                         </View>
                         
-                        {/* 🚨 ব্লার ভিউ */}
                         {isBlurred && !isAudioMode && (
                             <BlurView intensity={100} tint="dark" style={StyleSheet.absoluteFillObject} />
                         )}
 
-                        {/* 🤖 এআইয়ের চোখ */}
                         {aiVisionImage && isInteractiveFull && (
                             <View style={styles.debugWindow}>
                                 <Image source={{ uri: aiVisionImage }} style={{ flex: 1, width: '100%', height: '100%' }} resizeMode="contain" />
