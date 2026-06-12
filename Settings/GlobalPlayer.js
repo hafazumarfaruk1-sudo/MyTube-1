@@ -95,12 +95,11 @@ export default function GlobalPlayer() {
   const [isBlurred, setIsBlurred] = useState(false);
   const [blurOverlayImage, setBlurOverlayImage] = useState(null);
   
-  const aiDataMapRef = useRef({}); 
-  const backgroundScanSecRef = useRef(0); 
-  const isAiProcessingRef = useRef(false); 
+  const aiDataMapRef = useRef({}); // ডাটাবেস সেভ করার জন্য
+  const backgroundScanSecRef = useRef(0); // ৩, ৬, ৯ সেকেন্ড ট্র্যাকার
+  const isAiProcessingRef = useRef(false); // একই সাথে ২ বার যেন স্ক্যান না হয়
   
   const genderModelRef = useRef(null);
-  const snapshotRef = useRef(null); 
 
   useEffect(() => {
     const setupAudio = async () => {
@@ -212,9 +211,9 @@ export default function GlobalPlayer() {
       setIsBlurred(false); 
       setBlurOverlayImage(null);
       
-      // 🚨 নতুন ভিডিও প্লে হলে ডাটাবেস ক্লিয়ার
+      // 🚨 [RESET AI CHUNK DATABASE] নতুন ভিডিও প্লে হলে ডাটাবেস ক্লিয়ার করা হলো
       aiDataMapRef.current = {};
-      backgroundScanSecRef.current = 0; 
+      backgroundScanSecRef.current = 0; // ০ সেকেন্ড থেকে শুরু
       isAiProcessingRef.current = false;
 
       setCurrentTime(0); setBuffered(0); scale.setValue(1); baseScaleRef.current = 1;
@@ -251,20 +250,6 @@ export default function GlobalPlayer() {
 
     return () => { playSub.remove(); audioModeSub.remove(); };
   }, [isFullscreen, streamUrl, player]);
-
-  useEffect(() => {
-      let timeoutId;
-      if (videoSource && player) {
-          timeoutId = setTimeout(async () => {
-              try {
-                  if (resumeTimeRef.current > 0) { safeSeek(player, resumeTimeRef.current); }
-                  safePlay(player); 
-                  if (!isAudioMode && streamModeRef.current === 'separate' && syncAudioRef.current) { safeSeek(syncAudioRef.current, resumeTimeRef.current); syncAudioRef.current.play(); }
-              } catch (e) {}
-          }, 800); 
-      }
-      return () => clearTimeout(timeoutId);
-  }, [videoSource, isAudioMode, player]);
 
   const fetchStreamUrl = async (vidId, targetQuality, fetchId) => {
     try {
@@ -396,6 +381,7 @@ export default function GlobalPlayer() {
       }
   };
 
+  // 🚨 [SMART LOGIC] রিটার্ন করবে: 'w', 'm', বা 'none'
   const processFrameForGender = async (uri) => {
       try {
           const faces = await detectFacesWithMLKit(uri);
@@ -421,7 +407,7 @@ export default function GlobalPlayer() {
                   
                   if (femaleProbability >= 0.50) {
                       hasFemale = true;
-                      break; 
+                      break; // একটি মেয়ে পেলেই আর স্ক্যান করবে না
                   } else {
                       hasMale = true;
                   }
@@ -442,34 +428,23 @@ export default function GlobalPlayer() {
           if (!player || player.duration <= 0 || isAiProcessingRef.current || !videoSource) return;
           
           const duration = player.duration;
-          const currentPlaybackBlock = Math.floor(player.currentTime / 3) * 3;
-
-          // 🚨 [THE AUTO-SYNC JUMP FIX]
-          // যদি স্ক্যানার প্লেয়ারের চেয়ে পিছিয়ে পড়ে, তবে বর্তমান সময়ে লাফ দেবে
-          if (backgroundScanSecRef.current < currentPlaybackBlock) {
-              backgroundScanSecRef.current = currentPlaybackBlock;
-          }
-
           let targetSec = backgroundScanSecRef.current;
 
+          // ভিডিওর শেষ পর্যন্ত পৌঁছায়নি এমন সময়গুলোতে চেক করবে
           if (targetSec <= duration) {
-              // আগে স্ক্যান হয়ে থাকলে স্কিপ করবে
-              if (aiDataMapRef.current[targetSec] !== undefined) {
-                  backgroundScanSecRef.current += 3;
-                  return;
-              }
-
               isAiProcessingRef.current = true;
               try {
                   const thumbs = await player.generateThumbnailsAsync([targetSec]);
                   if (thumbs && thumbs.length > 0) {
                       const result = await processFrameForGender(thumbs[0].uri);
                       
+                      // ডাটাবেসে ডেটা সেভ করা হচ্ছে
                       aiDataMapRef.current[targetSec] = {
                           status: result, // 'w', 'm', 'none'
-                          uri: thumbs[0].uri 
+                          uri: thumbs[0].uri // ব্লার হিসেবে দেখানোর জন্য ছবিটিও সেভ রাখা হলো
                       };
                       
+                      // 🚨 [STEP 3] টার্মিনালে ডাটাবেসের অবস্থা প্রিন্ট করা
                       let terminalLog = `\n--- 📊 AI DATA MAP (Loaded) ---\n`;
                       Object.keys(aiDataMapRef.current)
                           .map(Number)
@@ -479,21 +454,21 @@ export default function GlobalPlayer() {
                           });
                       console.log(terminalLog);
                       
+                      // সফল হলে পরবর্তী ৩ সেকেন্ডের জন্য ইনডেক্স বাড়ানো হলো
+                      backgroundScanSecRef.current += 3;
                   } else {
+                      // যদি থাম্বনেইল না পাওয়া যায়, তবে none সেভ হবে
                       aiDataMapRef.current[targetSec] = { status: 'none', uri: null };
+                      backgroundScanSecRef.current += 3;
                   }
-                  // কাজ সফল হোক বা না হোক, সামনে এগিয়ে যাবে আটকে থাকবে না
-                  backgroundScanSecRef.current += 3;
-                  
               } catch(e) {
-                  // 🚨 [ERROR FIX] ফ্রেম না পেলে আটকে না থেকে 'none' দিয়ে সামনে চলে যাবে
-                  aiDataMapRef.current[targetSec] = { status: 'none', uri: null };
-                  backgroundScanSecRef.current += 3;
+                  // Error মানে ভিডিও এখনো ততটুকু লোড (Buffer) হয়নি। তাই স্ক্যানার এখানেই অপেক্ষা করবে।
+                  // console.log(`Waiting for buffer at ${targetSec}s...`);
               } finally {
                   isAiProcessingRef.current = false;
               }
           }
-      }, 300); // অতি দ্রুত স্ক্যান করবে
+      }, 500); // প্রতি ০.৫ সেকেন্ডে চেক করবে নতুন বাফার হলো কিনা
 
       return () => clearInterval(backgroundScanner);
   }, [player, videoSource]);
@@ -504,18 +479,22 @@ export default function GlobalPlayer() {
           if (!player || isAudioMode || !videoSource) return;
 
           const currentSec = player.currentTime;
+          // বর্তমান সময়কে ৩ এর গুণিতকে (Multiple of 3) ভাগ করা হচ্ছে 
+          // যেমন: ৭.৫ সেকেন্ড হলে সেটিকে ফ্লোর করে ৬ সেকেন্ডের ব্লকে ফেলা হবে (7.5/3 = 2.5 -> 2 * 3 = 6)
           const currentBucket = Math.floor(currentSec / 3) * 3;
           
           const chunkData = aiDataMapRef.current[currentBucket];
 
           if (chunkData && chunkData.status === 'w') {
+              // 🔴 এই ৩ সেকেন্ডের ব্লকে মহিলা আছে, তাই ব্লার অন করো!
               setIsBlurred(true);
               setBlurOverlayImage(chunkData.uri);
           } else {
+              // 🟢 এই ৩ সেকেন্ডের ব্লকে পুরুষ আছে বা কেউ নেই, ব্লার অফ করো!
               setIsBlurred(false);
           }
           
-      }, 200); 
+      }, 200); // চোখের পলকে চেক করে আপডেট করবে
 
       return () => clearInterval(displayUpdater);
   }, [player, isAudioMode, videoSource]);
@@ -649,7 +628,8 @@ export default function GlobalPlayer() {
             <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
                 {videoSource ? (
                     <>
-                        <View ref={snapshotRef} collapsable={false} style={styles.video}>
+                        {/* 🚨 surfaceType="textureView" */}
+                        <View collapsable={false} style={styles.video}>
                             <VideoView 
                                 player={player} 
                                 style={styles.video} 
@@ -660,6 +640,7 @@ export default function GlobalPlayer() {
                             />
                         </View>
                         
+                        {/* 🚨 Android Optical Illusion Blur */}
                         {isBlurred && blurOverlayImage && !isAudioMode && (
                             <View style={[StyleSheet.absoluteFillObject, { zIndex: 100, overflow: 'hidden' }]}>
                                 <Image 
