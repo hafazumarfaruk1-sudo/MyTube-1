@@ -354,20 +354,34 @@ export default function GlobalPlayer() {
           const rawBuffer = new Uint8Array(decode(base64Data));
           const rawImageData = jpeg.decode(rawBuffer, { useTArray: true });
 
-          const rgbPixels = new Float32Array(MODEL_SIZE * MODEL_SIZE * 3);
-          let rgbIndex = 0;
-          for (let i = 0; i < rawImageData.data.length; i += 4) {
-              rgbPixels[rgbIndex++] = rawImageData.data[i] / 255.0;     
-              rgbPixels[rgbIndex++] = rawImageData.data[i + 1] / 255.0; 
-              rgbPixels[rgbIndex++] = rawImageData.data[i + 2] / 255.0; 
+          // 🚨 [THE SMART FIX] - মডেলের ইনপুট চেক করে পিক্সেল ডেটা বানানো হচ্ছে
+          const inputTensor = genderModelRef.current.inputs[0];
+          const isUint8 = inputTensor.dataType === 'uint8';
+          
+          let inputData;
+          if (isUint8) {
+              inputData = new Uint8Array(MODEL_SIZE * MODEL_SIZE * 3);
+          } else {
+              inputData = new Float32Array(MODEL_SIZE * MODEL_SIZE * 3);
           }
 
-          // 🚨 [THE MAGIC FIX] - আমি তিনবার চেক করে ডাবল ব্র্যাকেট সরিয়ে দিয়েছি!
-          const output = await genderModelRef.current.run([rgbPixels.buffer]);
+          let rgbIndex = 0;
+          for (let i = 0; i < rawImageData.data.length; i += 4) {
+              if (isUint8) {
+                  inputData[rgbIndex++] = rawImageData.data[i];     
+                  inputData[rgbIndex++] = rawImageData.data[i + 1]; 
+                  inputData[rgbIndex++] = rawImageData.data[i + 2]; 
+              } else {
+                  inputData[rgbIndex++] = rawImageData.data[i] / 255.0;     
+                  inputData[rgbIndex++] = rawImageData.data[i + 1] / 255.0; 
+                  inputData[rgbIndex++] = rawImageData.data[i + 2] / 255.0; 
+              }
+          }
+
+          const output = await genderModelRef.current.run([inputData.buffer]);
 
           let probability = 0;
 
-          // 🚨 [BULLETPROOF OUTPUT PARSING]
           if (output && output.length > 0) {
               const firstTensor = output[0];
               
@@ -378,6 +392,7 @@ export default function GlobalPlayer() {
               }
           }
 
+          // যদি মডেলটি Uint8 হয়, তবে তার আউটপুট ২৫৫ এর মাঝে আসবে, তাই তাকে পার্সেন্টেজ বানানো হলো
           if (probability > 1) {
               probability = probability / 255.0;
           }
@@ -577,6 +592,7 @@ export default function GlobalPlayer() {
             <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
                 {videoSource ? (
                     <>
+                        {/* 🚨 surfaceType="textureView" - কালো স্ক্রিন ঠেকানোর ম্যাজিক */}
                         <View ref={snapshotRef} collapsable={false} style={styles.video}>
                             <VideoView 
                                 player={player} 
@@ -588,10 +604,12 @@ export default function GlobalPlayer() {
                             />
                         </View>
                         
+                        {/* 🚨 ব্লার ভিউ - এআই মেয়ে ডিটেক্ট করলেই এটি চালু হবে */}
                         {isBlurred && !isAudioMode && (
                             <BlurView intensity={100} tint="dark" style={StyleSheet.absoluteFillObject} />
                         )}
 
+                        {/* 🤖 এআইয়ের চোখ (টেস্টিং শেষ হলে মুছে ফেলতে পারেন) */}
                         {aiVisionImage && isInteractiveFull && (
                             <View style={styles.debugWindow}>
                                 <Image source={{ uri: aiVisionImage }} style={{ flex: 1, width: '100%', height: '100%' }} resizeMode="contain" />
