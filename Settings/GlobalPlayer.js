@@ -339,12 +339,12 @@ export default function GlobalPlayer() {
       try { return await FaceDetection.detect(uri); } catch (error) { return []; }
   };
 
+  // 🚨 [SMART FIX 1 & 2] - ডাইনামিক মডেল সাইজ এবং পিওর বাফার
   const checkGenderWithTFLite = async (croppedFaceUri) => {
       try {
           await loadGenderModelAsync();
-          if (!genderModelRef.current) return false;
+          if (!genderModelRef.current) return 0; // আমরা এখন বুলিয়ানের বদলে প্রোবাবিলিটি রিটার্ন করছি
 
-          // 🚨 [SMART FIX 1] মডেলের ডায়নামিক সাইজ বের করা হচ্ছে
           const inputTensor = genderModelRef.current.inputs?.[0];
           const MODEL_WIDTH = inputTensor?.shape?.[1] || 224;
           const MODEL_HEIGHT = inputTensor?.shape?.[2] || 224;
@@ -377,7 +377,6 @@ export default function GlobalPlayer() {
           }
 
           const output = await genderModelRef.current.run([pureInputBuffer]);
-
           let probability = 0;
 
           if (output && output.length > 0) {
@@ -410,11 +409,11 @@ export default function GlobalPlayer() {
 
           console.log(`👩 Female Probability: ${probability.toFixed(3)}`);
           
-          return probability > 0.2; 
+          return probability; // সরাসরি প্রোবাবিলিটি রিটার্ন করা হলো
           
       } catch (error) { 
           console.log("TFLite Checking Error:", error);
-          return false; 
+          return 0; 
       }
   };
 
@@ -432,34 +431,45 @@ export default function GlobalPlayer() {
           
           if (faces && faces.length > 0) {
               console.log(`👤 Faces found: ${faces.length}`);
-              const face = faces[0];
-              const box = face.frame || face.bounds || {}; 
               
-              // 🚨 [SMART FIX 2] পারফেক্ট ক্রপিং লজিক
-              let originX = Math.floor(box.left ?? box.x ?? box.originX ?? 0);
-              let originY = Math.floor(box.top ?? box.y ?? box.originY ?? 0);
-              let width = Math.floor(box.width ?? 0);
-              let height = Math.floor(box.height ?? 0);
-              
-              originX = Math.max(0, originX);
-              originY = Math.max(0, originY);
-              width = Math.max(10, width);
-              height = Math.max(10, height);
-              
-              if (width > 0 && height > 0) {
-                  const croppedFace = await ImageManipulator.manipulateAsync(
-                      uri, [{ crop: { originX, originY, width, height } }], { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
-                  );
+              let shouldBlurVideo = false;
+
+              // 🚨 [SMART FIX 3] স্ক্রিনে থাকা সবগুলো ফেস চেক করা হচ্ছে
+              for (let i = 0; i < faces.length; i++) {
+                  const face = faces[i];
+                  const box = face.frame || face.bounds || {}; 
                   
-                  // 🚨 [SMART FIX 3] ডানদিকের বক্সে এখন শুধু ক্রপ করা মুখটি দেখা যাবে!
-                  setAiVisionImage(croppedFace.uri);
+                  let originX = Math.floor(box.left ?? box.x ?? box.originX ?? 0);
+                  let originY = Math.floor(box.top ?? box.y ?? box.originY ?? 0);
+                  let width = Math.floor(box.width ?? 0);
+                  let height = Math.floor(box.height ?? 0);
                   
-                  const isFemale = await checkGenderWithTFLite(croppedFace.uri);
+                  originX = Math.max(0, originX);
+                  originY = Math.max(0, originY);
+                  width = Math.max(10, width);
+                  height = Math.max(10, height);
                   
-                  setIsBlurred(isFemale); 
-              } else {
-                  setIsBlurred(false);
+                  if (width > 0 && height > 0) {
+                      const croppedFace = await ImageManipulator.manipulateAsync(
+                          uri, [{ crop: { originX, originY, width, height } }], { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+                      );
+                      
+                      // শুধু প্রথম ফেসটি বক্সে দেখাবে
+                      if (i === 0) {
+                          setAiVisionImage(croppedFace.uri);
+                      }
+                      
+                      const femaleProbability = await checkGenderWithTFLite(croppedFace.uri);
+                      
+                      // 🎯 থ্রেশহোল্ড: প্রোবাবিলিটি ৫০% বা তার বেশি হলে ব্লার ট্রিগার
+                      if (femaleProbability >= 0.50) {
+                          shouldBlurVideo = true;
+                          break; // একটি মেয়ে ফেস পেলেই লুপ ভেঙে ব্লার করে দেবে
+                      }
+                  }
               }
+              
+              setIsBlurred(shouldBlurVideo); 
           } else {
               setIsBlurred(false); 
           }
