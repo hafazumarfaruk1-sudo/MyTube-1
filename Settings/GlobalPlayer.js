@@ -14,7 +14,6 @@ import * as WebBrowser from 'expo-web-browser';
 import AsyncStorage from '@react-native-async-storage/async-storage'; 
 
 // 🚨 [REAL AI INTEGRATION PACKAGES]
-import { BlurView } from 'expo-blur';
 import { captureRef } from 'react-native-view-shot'; 
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy'; 
@@ -99,10 +98,11 @@ export default function GlobalPlayer() {
   const [fullFrameUri, setFullFrameUri] = useState(null);
   
   const isAiProcessingRef = useRef(false);
-  const lastAiCheckTimeRef = useRef(0);
   
-  // ব্লার ধরে রাখার জন্য টাইম ট্র্যাকার
-  const lastFemaleDetectedTimeRef = useRef(-999);
+  // 🚨 [NEW] AI Cache Memory & Sticky State
+  const aiCacheRef = useRef({}); 
+  const isBlurStickyRef = useRef(false);
+  const lastProcessedSecRef = useRef(-1);
   
   const genderModelRef = useRef(null);
   const snapshotRef = useRef(null);
@@ -223,10 +223,12 @@ export default function GlobalPlayer() {
       setAiVisionImage(null); 
       setFullFrameUri(null);
       
-      lastFemaleDetectedTimeRef.current = -999;
+      // 🚨 নতুন ভিডিও শুরু হলে ক্যাশ এবং স্টিকি স্টেট ক্লিয়ার করা হলো
+      aiCacheRef.current = {};
+      isBlurStickyRef.current = false;
+      lastProcessedSecRef.current = -1;
       
       isAiProcessingRef.current = false;
-      lastAiCheckTimeRef.current = 0;
 
       setCurrentTime(0); setBuffered(0); scale.setValue(1); baseScaleRef.current = 1;
       triggerControls(); safeReleaseAudio();
@@ -337,7 +339,6 @@ export default function GlobalPlayer() {
               await asset.downloadAsync();
               const localUri = asset.localUri || asset.uri;
               genderModelRef.current = await loadTensorflowModel({ url: localUri }, []);
-              console.log("✅ Model Loaded Successfully from Local Cache!");
           } catch (e) { 
               console.log("Model Loading Failure:", e); 
           }
@@ -363,7 +364,6 @@ export default function GlobalPlayer() {
           );
 
           const base64Data = await FileSystem.readAsStringAsync(resizedImage.uri, { encoding: FileSystem.EncodingType.Base64 });
-          
           const rawBuffer = new Uint8Array(decode(base64Data));
           const rawImageData = jpeg.decode(rawBuffer, { useTArray: true });
 
@@ -390,19 +390,12 @@ export default function GlobalPlayer() {
           if (output && output.length > 0) {
               const rawOut = output[0];
               let outBuffer;
-              
-              if (rawOut instanceof ArrayBuffer) {
-                  outBuffer = rawOut;
-              } else if (rawOut && rawOut.buffer instanceof ArrayBuffer) {
-                  outBuffer = rawOut.buffer;
-              } else {
-                  outBuffer = new Float32Array(rawOut).buffer;
-              }
+              if (rawOut instanceof ArrayBuffer) outBuffer = rawOut;
+              else if (rawOut && rawOut.buffer instanceof ArrayBuffer) outBuffer = rawOut.buffer;
+              else outBuffer = new Float32Array(rawOut).buffer;
 
               const outTensor = genderModelRef.current.outputs?.[0];
-              const isOutUint8 = outTensor?.dataType === 'uint8' || outTensor?.dataType === 'int8';
-
-              if (isOutUint8) {
+              if (outTensor?.dataType === 'uint8' || outTensor?.dataType === 'int8') {
                   const outArray = new Uint8Array(outBuffer);
                   probability = outArray[0] / 255.0;
               } else {
@@ -411,105 +404,135 @@ export default function GlobalPlayer() {
               }
           }
 
-          if (typeof probability !== 'number' || isNaN(probability)) {
-              probability = 0;
-          }
-
-          console.log(`👩 Female Probability: ${probability.toFixed(3)}`);
+          if (typeof probability !== 'number' || isNaN(probability)) probability = 0;
           return probability;
           
       } catch (error) { 
-          console.log("TFLite Checking Error:", error);
           return 0; 
       }
   };
 
-  const runRealTimeAI = async () => {
-      if (!snapshotRef.current || !player) return;
-      isAiProcessingRef.current = true;
-      
+  // 🚨 [CORE AI PROCESSING LOGIC]
+  const processFrameForGender = async (uri, targetSec) => {
       try {
-          let uri = null;
-          
-          if (!player.playing) {
-              try {
-                  const thumbnails = await player.generateThumbnailsAsync([player.currentTime]);
-                  if (thumbnails && thumbnails.length > 0) {
-                      uri = thumbnails[0].uri;
-                  }
-              } catch (e) {
-                  console.log("Thumbnail Extraction Error:", e);
-              }
-          } 
-          
-          if (!uri) {
-              uri = await captureRef(snapshotRef, {
-                  format: 'jpg',
-                  quality: 0.8,
-              });
-          }
-
-          if (!uri) return; 
-
-          setFullFrameUri(uri);
-
           const faces = await detectFacesWithMLKit(uri);
-          const currentPlaybackTime = player.currentTime;
           
           if (faces && faces.length > 0) {
-              let shouldBlurVideo = false;
+              let hasFemale = false;
+              let hasMale = false;
 
               for (let i = 0; i < faces.length; i++) {
                   const face = faces[i];
                   const box = face.frame || face.bounds || {}; 
                   
-                  let originX = Math.floor(box.left ?? box.x ?? box.originX ?? 0);
-                  let originY = Math.floor(box.top ?? box.y ?? box.originY ?? 0);
-                  let width = Math.floor(box.width ?? 0);
-                  let height = Math.floor(box.height ?? 0);
+                  let originX = Math.floor(Math.max(0, box.left ?? box.x ?? box.originX ?? 0));
+                  let originY = Math.floor(Math.max(0, box.top ?? box.y ?? box.originY ?? 0));
+                  let width = Math.floor(Math.max(10, box.width ?? 0));
+                  let height = Math.floor(Math.max(10, box.height ?? 0));
                   
-                  originX = Math.max(0, originX);
-                  originY = Math.max(0, originY);
-                  width = Math.max(10, width);
-                  height = Math.max(10, height);
+                  const croppedFace = await ImageManipulator.manipulateAsync(
+                      uri, [{ crop: { originX, originY, width, height } }], { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+                  );
                   
-                  if (width > 0 && height > 0) {
-                      const croppedFace = await ImageManipulator.manipulateAsync(
-                          uri, [{ crop: { originX, originY, width, height } }], { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
-                      );
-                      
-                      if (i === 0) {
-                          setAiVisionImage(croppedFace.uri);
-                      }
-                      
-                      const femaleProbability = await checkGenderWithTFLite(croppedFace.uri);
-                      
-                      if (femaleProbability >= 0.50) {
-                          shouldBlurVideo = true;
-                          break; 
-                      }
+                  if (i === 0 && targetSec === Math.floor(player.currentTime)) {
+                      setAiVisionImage(croppedFace.uri);
+                  }
+                  
+                  const femaleProbability = await checkGenderWithTFLite(croppedFace.uri);
+                  
+                  if (femaleProbability >= 0.50) {
+                      hasFemale = true;
+                  } else {
+                      hasMale = true;
                   }
               }
               
-              if (shouldBlurVideo) {
-                  lastFemaleDetectedTimeRef.current = currentPlaybackTime;
-                  setIsBlurred(true); 
-              } else {
-                  if (currentPlaybackTime - lastFemaleDetectedTimeRef.current <= 5) {
-                      setIsBlurred(true);
-                      console.log("Holding Blur for continuity...");
-                  } else {
-                      setIsBlurred(false); 
-                  }
-              }
-          } else {
-              if (currentPlaybackTime - lastFemaleDetectedTimeRef.current <= 5) {
-                  setIsBlurred(true);
-                  console.log("Holding Blur (No Faces) for continuity...");
-              } else {
-                  setIsBlurred(false); 
-              }
+              if (hasFemale) return true;  // মহিলা পাওয়া গেছে
+              if (hasMale && !hasFemale) return false; // শুধুমাত্র পুরুষ পাওয়া গেছে
           }
+          return null; // কোনো মানুষ পাওয়া যায়নি
+      } catch(e) {
+          return null;
+      }
+  };
+
+  const applyBlurState = (isFemaleDetected, targetSec) => {
+      if (isFemaleDetected === true) {
+          // 🚨 মহিলা পাওয়া গেছে -> ব্লার অন এবং স্টিকি অন
+          aiCacheRef.current[targetSec] = true;
+          isBlurStickyRef.current = true;
+          setIsBlurred(true);
+      } else if (isFemaleDetected === false) {
+          // 🚨 শুধুমাত্র পুরুষ পাওয়া গেছে -> ব্লার অফ এবং স্টিকি অফ
+          aiCacheRef.current[targetSec] = false;
+          isBlurStickyRef.current = false;
+          setIsBlurred(false);
+      } else {
+          // 🚨 কেউ নেই (ফাঁকা স্ক্রিন) -> আগের ব্লার স্ট্যাটাস ধরে রাখবে (Sticky)
+          aiCacheRef.current[targetSec] = null;
+          setIsBlurred(isBlurStickyRef.current);
+      }
+  };
+
+  // 🚨 [BACKGROUND BUFFER PRE-LOADER]
+  const scanFutureBuffer = async (currentSec) => {
+      // ভিডিওর সামনের ৩ সেকেন্ড চেক করবে
+      for (let i = 1; i <= 3; i++) {
+          const futureSec = currentSec + i;
+          if (futureSec > duration) break;
+          
+          // যদি মেমোরিতে এই সেকেন্ড সেভ না থাকে, তবে ব্যাকগ্রাউন্ডে চেক করবে
+          if (aiCacheRef.current[futureSec] === undefined) {
+              try {
+                  const thumbnails = await player.generateThumbnailsAsync([futureSec]);
+                  if (thumbnails && thumbnails.length > 0) {
+                      const result = await processFrameForGender(thumbnails[0].uri, futureSec);
+                      aiCacheRef.current[futureSec] = result;
+                  }
+              } catch(e) {}
+              break; // ল্যাগ এড়ানোর জন্য প্রতি সেকেন্ডে একটির বেশি ফিউচার ফ্রেম চেক করবে না
+          }
+      }
+  };
+
+  const runRealTimeAI = async () => {
+      if (!player || isAiProcessingRef.current) return;
+      isAiProcessingRef.current = true;
+      
+      try {
+          const currentSec = Math.floor(player.currentTime);
+          
+          // একই সেকেন্ডে বারবার কাজ করবে না
+          if (currentSec === lastProcessedSecRef.current) return;
+          lastProcessedSecRef.current = currentSec;
+
+          // 🚨 [STEP 1: CHECK CACHE] মেমোরিতে সেভ থাকলে সরাসরি তা ব্যবহার করবে
+          if (aiCacheRef.current[currentSec] !== undefined) {
+              const cachedResult = aiCacheRef.current[currentSec];
+              applyBlurState(cachedResult, currentSec);
+              
+              // ক্যাশ থেকে পেয়ে গেলে, ওই সময়টাতে সামনের ফ্রেমগুলো লোড করবে
+              await scanFutureBuffer(currentSec);
+              return;
+          }
+
+          // 🚨 [STEP 2: CAPTURE REAL-TIME] মেমোরিতে না থাকলে সরাসরি স্ক্রিনশট নিবে
+          let uri = null;
+          if (snapshotRef.current && player.playing) {
+              uri = await captureRef(snapshotRef, { format: 'jpg', quality: 0.8 });
+          } else if (!player.playing) {
+              try {
+                  const thumbs = await player.generateThumbnailsAsync([player.currentTime]);
+                  if (thumbs && thumbs.length > 0) uri = thumbs[0].uri;
+              } catch(e) {}
+          }
+
+          if (!uri) return; 
+          setFullFrameUri(uri);
+
+          const result = await processFrameForGender(uri, currentSec);
+          applyBlurState(result, currentSec);
+
       } catch (error) {
           console.log(`❌ AI Failed: ${error.message || error}`);
       } finally {
@@ -532,17 +555,13 @@ export default function GlobalPlayer() {
                     pendingSeekRef.current = null;
                 } else if (!isSlidingRef.current) {
                     try {
-                        if (player.currentTime > 0 || player.playing) {
+                        if (player.currentTime >= 0) {
                             setCurrentTime(player.currentTime);
                             if (player.duration > 0) setDuration(player.duration);
                             
-                            // 🚨 [SUPER SPEED AI] এখন এটি প্রতি ১ সেকেন্ড পরপর ভিডিও চেক করবে!
+                            // 🤖 প্রতি সেকেন্ডে এআই ফায়ার হবে
                             if (videoSource && !isAudioMode) {
-                                const currentSec = player.currentTime;
-                                if (Math.abs(currentSec - lastAiCheckTimeRef.current) >= 1 && !isAiProcessingRef.current) {
-                                    lastAiCheckTimeRef.current = currentSec;
-                                    runRealTimeAI();
-                                }
+                                runRealTimeAI();
                             }
                         }
                     } catch(e) {}
@@ -564,7 +583,7 @@ export default function GlobalPlayer() {
         } catch(e) {}
 
         isSyncingRef.current = false;
-    }, 1000);
+    }, 1000); // 🚨 প্রতি ১ সেকেন্ডে চলবে
     return () => clearInterval(interval);
   }, [player, streamMode, isAudioMode, videoSource]);
 
