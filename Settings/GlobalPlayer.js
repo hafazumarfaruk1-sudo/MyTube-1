@@ -14,7 +14,6 @@ import * as WebBrowser from 'expo-web-browser';
 import AsyncStorage from '@react-native-async-storage/async-storage'; 
 
 // 🚨 [REAL AI INTEGRATION PACKAGES]
-import { BlurView } from 'expo-blur';
 import { captureRef } from 'react-native-view-shot'; 
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy'; 
@@ -96,12 +95,14 @@ export default function GlobalPlayer() {
 
   const [isBlurred, setIsBlurred] = useState(false);
   const [aiVisionImage, setAiVisionImage] = useState(null); 
-  
-  // 🚨 [NEW STATE] পুরো স্ক্রিনের রিয়েল-টাইম ফ্রেমটি সেভ রাখার জন্য
   const [fullFrameUri, setFullFrameUri] = useState(null);
   
   const isAiProcessingRef = useRef(false);
   const lastAiCheckTimeRef = useRef(0);
+  
+  // 🚨 [NEW] ব্লার ধরে রাখার জন্য টাইম ট্র্যাকার
+  const lastFemaleDetectedTimeRef = useRef(-999);
+  
   const genderModelRef = useRef(null);
   const snapshotRef = useRef(null);
 
@@ -219,7 +220,11 @@ export default function GlobalPlayer() {
       
       setIsBlurred(false); 
       setAiVisionImage(null); 
-      setFullFrameUri(null); // 🚨 রিসেট
+      setFullFrameUri(null);
+      
+      // 🚨 [RESET] নতুন ভিডিও শুরু হলে হোল্ড টাইমার জিরো করে দেওয়া হচ্ছে
+      lastFemaleDetectedTimeRef.current = -999;
+      
       isAiProcessingRef.current = false;
       lastAiCheckTimeRef.current = 0;
 
@@ -419,23 +424,40 @@ export default function GlobalPlayer() {
       }
   };
 
-  const runRealTimeAI = async (timeInSeconds) => {
-      if (!snapshotRef.current) return;
+  const runRealTimeAI = async () => {
+      if (!snapshotRef.current || !player) return;
       isAiProcessingRef.current = true;
       
       try {
-          const uri = await captureRef(snapshotRef, {
-              format: 'jpg',
-              quality: 0.8,
-          });
+          let uri = null;
+          
+          if (!player.playing) {
+              try {
+                  const thumbnails = await player.generateThumbnailsAsync([player.currentTime]);
+                  if (thumbnails && thumbnails.length > 0) {
+                      uri = thumbnails[0].uri;
+                  }
+              } catch (e) {
+                  console.log("Thumbnail Extraction Error:", e);
+              }
+          } 
+          
+          if (!uri) {
+              uri = await captureRef(snapshotRef, {
+                  format: 'jpg',
+                  quality: 0.8,
+              });
+          }
 
-          // 🚨 [SAVING THE FRAME] ব্লার করার জন্য পুরো ফ্রেমটি সেভ করে রাখা হলো
+          if (!uri) return; 
+
+          // নতুন ফ্রেম আসার সাথে সাথে সেট করা হলো যাতে ব্লার ইফেক্ট আপডেট হয়
           setFullFrameUri(uri);
 
           const faces = await detectFacesWithMLKit(uri);
+          const currentPlaybackTime = player.currentTime;
           
           if (faces && faces.length > 0) {
-              console.log(`👤 Faces found: ${faces.length}`);
               let shouldBlurVideo = false;
 
               for (let i = 0; i < faces.length; i++) {
@@ -470,9 +492,28 @@ export default function GlobalPlayer() {
                   }
               }
               
-              setIsBlurred(shouldBlurVideo); 
+              // 🚨 [SMART BLUR HOLD LOGIC]
+              if (shouldBlurVideo) {
+                  // মহিলা পেলে সাথে সাথে টাইম নোট করে রাখবো এবং ব্লার অন করব
+                  lastFemaleDetectedTimeRef.current = currentPlaybackTime;
+                  setIsBlurred(true); 
+              } else {
+                  // মহিলা না পেলেও যদি ৫ সেকেন্ড পার না হয়, তবে ব্লার ধরে রাখবো
+                  if (currentPlaybackTime - lastFemaleDetectedTimeRef.current <= 5) {
+                      setIsBlurred(true);
+                      console.log("Holding Blur for continuity...");
+                  } else {
+                      setIsBlurred(false); 
+                  }
+              }
           } else {
-              setIsBlurred(false); 
+              // স্ক্রিনে কোনো মানুষ না থাকলেও চেক করবো ৫ সেকেন্ড পার হয়েছে কিনা
+              if (currentPlaybackTime - lastFemaleDetectedTimeRef.current <= 5) {
+                  setIsBlurred(true);
+                  console.log("Holding Blur (No Faces) for continuity...");
+              } else {
+                  setIsBlurred(false); 
+              }
           }
       } catch (error) {
           console.log(`❌ AI Failed: ${error.message || error}`);
@@ -500,11 +541,12 @@ export default function GlobalPlayer() {
                             setCurrentTime(player.currentTime);
                             if (player.duration > 0) setDuration(player.duration);
                             
-                            if (videoSource && !isAudioMode && player.playing) {
+                            // 🚨 [AI SPEED UP] ৩ সেকেন্ডের বদলে ২ সেকেন্ড করা হলো যাতে আরও দ্রুত কাজ করে
+                            if (videoSource && !isAudioMode) {
                                 const currentSec = player.currentTime;
-                                if (Math.abs(currentSec - lastAiCheckTimeRef.current) >= 3 && !isAiProcessingRef.current) {
+                                if (Math.abs(currentSec - lastAiCheckTimeRef.current) >= 2 && !isAiProcessingRef.current) {
                                     lastAiCheckTimeRef.current = currentSec;
-                                    runRealTimeAI(currentSec);
+                                    runRealTimeAI();
                                 }
                             }
                         }
@@ -616,6 +658,7 @@ export default function GlobalPlayer() {
             <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
                 {videoSource ? (
                     <>
+                        {/* 🚨 surfaceType="textureView" */}
                         <View ref={snapshotRef} collapsable={false} style={styles.video}>
                             <VideoView 
                                 player={player} 
@@ -627,16 +670,14 @@ export default function GlobalPlayer() {
                             />
                         </View>
                         
-                        {/* 🚨 [THE ULTIMATE HACK] Android-এর হার্ডওয়্যার লেয়ার লিমিটেশন বাইপাস! */}
+                        {/* 🚨 Android-এর হার্ডওয়্যার লেয়ার লিমিটেশন বাইপাস! */}
                         {isBlurred && fullFrameUri && !isAudioMode && (
                             <View style={[StyleSheet.absoluteFillObject, { zIndex: 100, overflow: 'hidden' }]}>
-                                {/* ভিডিওর ওপর স্ক্রিনশট বসিয়ে সেটিকে ব্লার করা হলো */}
                                 <Image 
                                     source={{ uri: fullFrameUri }} 
                                     style={[StyleSheet.absoluteFillObject, { transform: [{ scale: 1.1 }] }]} 
                                     blurRadius={50} 
                                 />
-                                {/* সুন্দর একটি ডার্ক ওভারলে এবং আইকন */}
                                 <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' }]}>
                                     <Ionicons name="eye-off-outline" size={80} color="#FFF" />
                                     <Text style={{ color: '#FFF', fontSize: 18, fontWeight: 'bold', marginTop: 15 }}>মহিলা শনাক্ত হয়েছে</Text>
