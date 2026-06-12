@@ -17,7 +17,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BlurView } from 'expo-blur';
 import { captureRef } from 'react-native-view-shot'; 
 import * as ImageManipulator from 'expo-image-manipulator';
-// 🚨 [THE MAGIC FIX] - legacy API ইম্পোর্ট করা হলো যাতে আর কোনো deprecation এরর না আসে!
 import * as FileSystem from 'expo-file-system/legacy'; 
 import { decode } from 'base64-arraybuffer'; 
 import * as jpeg from 'jpeg-js';
@@ -325,7 +324,6 @@ export default function GlobalPlayer() {
   const loadGenderModelAsync = async () => {
       if (!genderModelRef.current) {
           try {
-              console.log("Loading Tensorflow Lite Model...");
               const asset = Asset.fromModule(require('../assets/gender_classification.tflite'));
               await asset.downloadAsync();
               const localUri = asset.localUri || asset.uri;
@@ -351,7 +349,6 @@ export default function GlobalPlayer() {
               croppedFaceUri, [{ resize: { width: MODEL_SIZE, height: MODEL_SIZE } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
           );
 
-          // 🚨 FileSystem.EncodingType.Base64 পুরোনো API থেকে কাজ করবে
           const base64Data = await FileSystem.readAsStringAsync(resizedImage.uri, { encoding: FileSystem.EncodingType.Base64 });
           
           const rawBuffer = new Uint8Array(decode(base64Data));
@@ -365,7 +362,9 @@ export default function GlobalPlayer() {
               rgbPixels[rgbIndex++] = rawImageData.data[i + 2] / 255.0; 
           }
 
-          const output = await genderModelRef.current.run([rgbPixels]);
+          // 🚨 [THE MAGIC BUFFER FIX] - C++ Nitro Engine কে array buffer পাঠানো হলো
+          const output = await genderModelRef.current.run([rgbPixels.buffer]);
+
           if (output && output[0] && output[0].length > 0) {
               const probability = output[0][0];
               console.log(`👩 Female Probability: ${probability.toFixed(3)}`);
@@ -394,6 +393,7 @@ export default function GlobalPlayer() {
           console.log(`👤 Faces found: ${faces.length}`);
 
           if (faces && faces.length > 0) {
+              // আমরা শুধু প্রথম ফেসটি নিচ্ছি
               const face = faces[0];
               const box = face.frame || face.bounds || {}; 
               
@@ -406,7 +406,11 @@ export default function GlobalPlayer() {
                   const croppedFace = await ImageManipulator.manipulateAsync(
                       uri, [{ crop: { originX, originY, width, height } }], { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
                   );
+                  
+                  // এআই চেক করবে ফেসটি মেয়ে কিনা
                   const isFemale = await checkGenderWithTFLite(croppedFace.uri);
+                  
+                  // মেয়ে হলে পুরো ভিডিও ব্লার করে দেবে
                   setIsBlurred(isFemale); 
               } else {
                   setIsBlurred(false);
@@ -440,7 +444,7 @@ export default function GlobalPlayer() {
                             setCurrentTime(player.currentTime);
                             if (player.duration > 0) setDuration(player.duration);
                             
-                            // 🤖 ৩ সেকেন্ড পরপর এআই চেক 
+                            // 🤖 প্রতি ৩ সেকেন্ড পরপর এআই ভিডিও স্ক্যান করবে
                             if (videoSource && !isAudioMode && player.playing) {
                                 const currentSec = player.currentTime;
                                 if (Math.abs(currentSec - lastAiCheckTimeRef.current) >= 3 && !isAiProcessingRef.current) {
@@ -557,6 +561,7 @@ export default function GlobalPlayer() {
             <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
                 {videoSource ? (
                     <>
+                        {/* 🚨 surfaceType="textureView" - কালো স্ক্রিন ঠেকানোর ম্যাজিক */}
                         <View ref={snapshotRef} collapsable={false} style={styles.video}>
                             <VideoView 
                                 player={player} 
@@ -568,10 +573,12 @@ export default function GlobalPlayer() {
                             />
                         </View>
                         
+                        {/* 🚨 ব্লার ভিউ - এআই মেয়ে ডিটেক্ট করলেই এটি চালু হবে */}
                         {isBlurred && !isAudioMode && (
                             <BlurView intensity={100} tint="dark" style={StyleSheet.absoluteFillObject} />
                         )}
 
+                        {/* 🤖 এআইয়ের চোখ (টেস্টিং শেষ হলে মুছে ফেলতে পারেন) */}
                         {aiVisionImage && isInteractiveFull && (
                             <View style={styles.debugWindow}>
                                 <Image source={{ uri: aiVisionImage }} style={{ flex: 1, width: '100%', height: '100%' }} resizeMode="contain" />
