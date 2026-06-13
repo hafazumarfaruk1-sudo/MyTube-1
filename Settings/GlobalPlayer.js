@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking, AppState } from 'react-native';
+import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking, AppState, Platform } from 'react-native';
 
 // 🚨 [LATEST PACKAGES]
 import { useVideoPlayer, VideoView } from 'expo-video'; 
@@ -61,10 +61,7 @@ export default function GlobalPlayer() {
 
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(1);
-  
-  // 🚨 [FIXED] হারানো buffered স্টেটটি ফিরে এসেছে
   const [buffered, setBuffered] = useState(0); 
-  
   const [isPlayingUI, setIsPlayingUI] = useState(false); 
   const [showControls, setShowControls] = useState(true);
   const controlsTimeoutRef = useRef(null);
@@ -81,6 +78,7 @@ export default function GlobalPlayer() {
   const isSyncingRef = useRef(false);
   const pendingSeekRef = useRef(null); 
 
+  // 🚨 [NEW] শুধুমাত্র ফ্রেম এক্সট্রাক্ট করার স্ট্যাটাস
   const targetScanSecRef = useRef(0); 
   const isExtractingRef = useRef(false);
 
@@ -176,6 +174,7 @@ export default function GlobalPlayer() {
       setPlayerState('full');
       setStreamUrl(null); setVideoSource(null); resumeTimeRef.current = 0; 
       
+      // 🚨 নতুন ভিডিও শুরু হলে স্ক্যানার রিসেট
       targetScanSecRef.current = 0; 
       isExtractingRef.current = false;
 
@@ -212,35 +211,42 @@ export default function GlobalPlayer() {
   
   useEffect(() => {
       const frameScanner = setInterval(async () => {
+          // ভিডিও সোর্স না থাকলে বা প্লেয়ার রেডি না থাকলে কাজ করবে না
           if (!player || player.duration <= 0 || isExtractingRef.current || !videoSource) return;
           
           let targetSec = targetScanSecRef.current;
           const duration = player.duration;
 
+          // ভিডিও শেষ হয়ে গেলে স্ক্যান বন্ধ
           if (targetSec > duration) return;
 
           isExtractingRef.current = true;
 
           try {
+              // 🚨 [PROBING THE LOADED BUFFER]
               const extractPromise = player.generateThumbnailsAsync([targetSec]);
               const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 2000));
               
               const thumbs = await Promise.race([extractPromise, timeoutPromise]);
 
               if (thumbs && thumbs.length > 0) {
+                  // ফ্রেম সফলভাবে কাটা হয়েছে
                   console.log(`✅ [${targetSec}s] Frame cut from LOADED VIDEO -> ${thumbs[0].uri}`);
+                  
+                  // সফল হলে পরবর্তী ৩ সেকেন্ডের জন্য এগোবে
                   targetScanSecRef.current += 3;
               } else {
                   console.log(`⚠️ [${targetSec}s] Frame returned empty.`);
               }
 
           } catch(e) {
+              // TIMEOUT - তারমানে ভিডিও এখনো ওই সেকেন্ড পর্যন্ত ইন্টারনেট থেকে লোড (Buffer) হয়নি
               console.log(`⏳ [${targetSec}s] Waiting for video to load...`);
           } finally {
               isExtractingRef.current = false;
           }
           
-      }, 1000); 
+      }, 1000); // প্রতি ১ সেকেন্ডে চেক করবে নতুন বাফার হলো কিনা
 
       return () => clearInterval(frameScanner);
   }, [player, videoSource]);
