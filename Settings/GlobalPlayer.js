@@ -13,6 +13,15 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import * as WebBrowser from 'expo-web-browser'; 
 import AsyncStorage from '@react-native-async-storage/async-storage'; 
 
+// 🚨 [REAL AI INTEGRATION PACKAGES]
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as FileSystem from 'expo-file-system/legacy'; 
+import { decode } from 'base64-arraybuffer'; 
+import * as jpeg from 'jpeg-js';
+import { Asset } from 'expo-asset'; 
+import FaceDetection from '@react-native-ml-kit/face-detection';
+import { loadTensorflowModel } from 'react-native-fast-tflite';
+
 LogBox.ignoreLogs(['Video component', 'expo-audio', 'expo-video', 'InteractionManager', 'SafeAreaView']);
 
 const windowDim = Dimensions.get('window');
@@ -78,9 +87,14 @@ export default function GlobalPlayer() {
   const isSyncingRef = useRef(false);
   const pendingSeekRef = useRef(null); 
 
-  // 🚨 [NEW] শুধুমাত্র ফ্রেম এক্সট্রাক্ট করার স্ট্যাটাস
+  const aiDataMapRef = useRef({}); 
   const targetScanSecRef = useRef(0); 
   const isExtractingRef = useRef(false);
+  
+  // 🚨 [NEW] ভিডিও ডিকোডারকে রিল্যাক্স করার জন্য একটি নতুন Ref
+  const hasVideoStartedRef = useRef(false);
+
+  const genderModelRef = useRef(null);
 
   useEffect(() => {
     const setupAudio = async () => {
@@ -174,9 +188,10 @@ export default function GlobalPlayer() {
       setPlayerState('full');
       setStreamUrl(null); setVideoSource(null); resumeTimeRef.current = 0; 
       
-      // 🚨 নতুন ভিডিও শুরু হলে স্ক্যানার রিসেট
+      aiDataMapRef.current = {};
       targetScanSecRef.current = 0; 
       isExtractingRef.current = false;
+      hasVideoStartedRef.current = false; // 🚨 ডিকোডার স্ট্যাটাস রিসেট
 
       setCurrentTime(0); setBuffered(0); scale.setValue(1); baseScaleRef.current = 1;
       triggerControls();
@@ -206,47 +221,171 @@ export default function GlobalPlayer() {
     setStreamUrl(json.url); setVideoSource(json.url); 
   };
 
+  // 🤖 -------------------- AI ENGINE START -------------------- 🤖
+  
+  const loadGenderModelAsync = async () => {
+      if (!genderModelRef.current) {
+          try {
+              const asset = Asset.fromModule(require('../assets/gender_classification.tflite'));
+              await asset.downloadAsync();
+              genderModelRef.current = await loadTensorflowModel({ url: asset.localUri || asset.uri }, []);
+          } catch (e) { }
+      }
+  };
 
-  // 🚨 -------------------- LOADED BUFFER EXTRACTION ENGINE -------------------- 🚨
+  const detectFacesWithMLKit = async (uri) => {
+      try { return await FaceDetection.detect(uri); } catch (error) { return []; }
+  };
+
+  const checkGenderWithTFLite = async (croppedFaceUri) => {
+      try {
+          await loadGenderModelAsync();
+          if (!genderModelRef.current) return 0;
+
+          const inputTensor = genderModelRef.current.inputs?.[0];
+          const MODEL_WIDTH = inputTensor?.shape?.[1] || 224;
+          const MODEL_HEIGHT = inputTensor?.shape?.[2] || 224;
+          const isUint8 = inputTensor?.dataType === 'uint8' || inputTensor?.dataType === 'int8';
+
+          const resizedImage = await ImageManipulator.manipulateAsync(
+              croppedFaceUri, [{ resize: { width: MODEL_WIDTH, height: MODEL_HEIGHT } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+          );
+
+          const base64Data = await FileSystem.readAsStringAsync(resizedImage.uri, { encoding: FileSystem.EncodingType.Base64 });
+          const rawBuffer = new Uint8Array(decode(base64Data));
+          const rawImageData = jpeg.decode(rawBuffer, { useTArray: true });
+
+          const bufferSize = MODEL_WIDTH * MODEL_HEIGHT * 3 * (isUint8 ? 1 : 4);
+          const pureInputBuffer = new ArrayBuffer(bufferSize);
+          const inputData = isUint8 ? new Uint8Array(pureInputBuffer) : new Float32Array(pureInputBuffer);
+
+          let rgbIndex = 0;
+          for (let i = 0; i < rawImageData.data.length; i += 4) {
+              if (isUint8) {
+                  inputData[rgbIndex++] = rawImageData.data[i];     
+                  inputData[rgbIndex++] = rawImageData.data[i + 1]; 
+                  inputData[rgbIndex++] = rawImageData.data[i + 2]; 
+              } else {
+                  inputData[rgbIndex++] = rawImageData.data[i] / 255.0;     
+                  inputData[rgbIndex++] = rawImageData.data[i + 1] / 255.0; 
+                  inputData[rgbIndex++] = rawImageData.data[i + 2] / 255.0; 
+              }
+          }
+
+          const output = await genderModelRef.current.run([pureInputBuffer]);
+          let probability = 0;
+
+          if (output && output.length > 0) {
+              const rawOut = output[0];
+              let outBuffer;
+              if (rawOut instanceof ArrayBuffer) outBuffer = rawOut;
+              else if (rawOut && rawOut.buffer instanceof ArrayBuffer) outBuffer = rawOut.buffer;
+              else outBuffer = new Float32Array(rawOut).buffer;
+
+              const outTensor = genderModelRef.current.outputs?.[0];
+              if (outTensor?.dataType === 'uint8' || outTensor?.dataType === 'int8') {
+                  probability = new Uint8Array(outBuffer)[0] / 255.0;
+              } else {
+                  probability = new Float32Array(outBuffer)[0];
+              }
+          }
+
+          if (typeof probability !== 'number' || isNaN(probability)) probability = 0;
+          return probability;
+          
+      } catch (error) { 
+          return 0; 
+      }
+  };
+
+  const processFrameForGender = async (uri) => {
+      try {
+          const faces = await detectFacesWithMLKit(uri);
+          
+          if (faces && faces.length > 0) {
+              let hasFemale = false;
+              let hasMale = false;
+
+              for (let i = 0; i < faces.length; i++) {
+                  const face = faces[i];
+                  const box = face.frame || face.bounds || {}; 
+                  
+                  let originX = Math.floor(Math.max(0, box.left ?? box.x ?? box.originX ?? 0));
+                  let originY = Math.floor(Math.max(0, box.top ?? box.y ?? box.originY ?? 0));
+                  let width = Math.floor(Math.max(10, box.width ?? 0));
+                  let height = Math.floor(Math.max(10, box.height ?? 0));
+                  
+                  const croppedFace = await ImageManipulator.manipulateAsync(
+                      uri, [{ crop: { originX, originY, width, height } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+                  );
+                  
+                  const femaleProbability = await checkGenderWithTFLite(croppedFace.uri);
+                  
+                  if (femaleProbability >= 0.50) {
+                      hasFemale = true;
+                      break; 
+                  } else {
+                      hasMale = true;
+                  }
+              }
+              
+              if (hasFemale) return 'w';
+              if (hasMale) return 'm';
+          }
+          return 'none';
+      } catch (error) {
+          return 'none';
+      }
+  };
+
+  // 🚨 -------------------- DEADLOCK-FREE EXTRACTION ENGINE -------------------- 🚨
   
   useEffect(() => {
       const frameScanner = setInterval(async () => {
-          // ভিডিও সোর্স না থাকলে বা প্লেয়ার রেডি না থাকলে কাজ করবে না
-          if (!player || player.duration <= 0 || isExtractingRef.current || !videoSource) return;
+          // 🚨 THE FIX: ভিডিও প্লে না হওয়া পর্যন্ত স্ক্যানার শুরু হবে না (Deadlock Prevention)
+          if (!player || player.duration <= 0 || isExtractingRef.current || !videoSource || !hasVideoStartedRef.current) {
+              return;
+          }
           
           let targetSec = targetScanSecRef.current;
           const duration = player.duration;
 
-          // ভিডিও শেষ হয়ে গেলে স্ক্যান বন্ধ
           if (targetSec > duration) return;
 
           isExtractingRef.current = true;
 
           try {
-              // 🚨 [PROBING THE LOADED BUFFER]
+              // ৩ সেকেন্ডের টাইমআউট দিয়েছি যাতে ইন্টারভালের সাথে জ্যাম না বাঁধে
               const extractPromise = player.generateThumbnailsAsync([targetSec]);
-              const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 2000));
+              const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 3000));
               
               const thumbs = await Promise.race([extractPromise, timeoutPromise]);
 
               if (thumbs && thumbs.length > 0) {
-                  // ফ্রেম সফলভাবে কাটা হয়েছে
-                  console.log(`✅ [${targetSec}s] Frame cut from LOADED VIDEO -> ${thumbs[0].uri}`);
+                  const result = await processFrameForGender(thumbs[0].uri);
+                  aiDataMapRef.current[targetSec] = result;
                   
-                  // সফল হলে পরবর্তী ৩ সেকেন্ডের জন্য এগোবে
+                  let terminalLog = `\n--- 📊 AI DATA MAP (Loaded Buffer) ---\n`;
+                  Object.keys(aiDataMapRef.current)
+                      .map(Number)
+                      .sort((a,b) => a - b)
+                      .forEach(timeKey => {
+                          terminalLog += `${timeKey}-${aiDataMapRef.current[timeKey]}\n`;
+                      });
+                  console.log(terminalLog);
+                  
                   targetScanSecRef.current += 3;
               } else {
                   console.log(`⚠️ [${targetSec}s] Frame returned empty.`);
               }
 
           } catch(e) {
-              // TIMEOUT - তারমানে ভিডিও এখনো ওই সেকেন্ড পর্যন্ত ইন্টারনেট থেকে লোড (Buffer) হয়নি
-              console.log(`⏳ [${targetSec}s] Waiting for video to load...`);
+              console.log(`⏳ [${targetSec}s] Waiting for video buffer...`);
           } finally {
               isExtractingRef.current = false;
           }
           
-      }, 1000); // প্রতি ১ সেকেন্ডে চেক করবে নতুন বাফার হলো কিনা
+      }, 4000); // 🚨 THE FIX: প্রতি ৪ সেকেন্ডে একবার চেক করবে (ইঞ্জিনকে নিঃশ্বাস নেওয়ার সময় দেওয়া হলো)
 
       return () => clearInterval(frameScanner);
   }, [player, videoSource]);
@@ -262,6 +401,11 @@ export default function GlobalPlayer() {
         try {
             setIsPlayingUI(player?.playing || false);
             if (player) {
+                // 🚨 ভিডিও প্লে হওয়া শুরু হলে স্ক্যানারকে সিগন্যাল দেওয়া হচ্ছে
+                if (player.playing && !hasVideoStartedRef.current) {
+                    hasVideoStartedRef.current = true;
+                }
+
                 if (player.currentTime >= 0) {
                     setCurrentTime(player.currentTime);
                     if (player.duration > 0) setDuration(player.duration);
