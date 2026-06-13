@@ -91,19 +91,16 @@ export default function GlobalPlayer() {
   const isSyncingRef = useRef(false);
   const pendingSeekRef = useRef(null); 
 
-  // 🚨 [FIXED] যে ভেরিয়েবলগুলোর কারণে এরর এসেছিল সেগুলো যুক্ত করা হলো
+  // 🚨 [PRO AI STATES - 3 SECOND CHUNK ARCHITECTURE]
   const [isBlurred, setIsBlurred] = useState(false);
   const [blurOverlayImage, setBlurOverlayImage] = useState(null);
-  const [aiVisionImage, setAiVisionImage] = useState(null); 
-  const [fullFrameUri, setFullFrameUri] = useState(null); 
   
-  // 🚨 [PRO AI STATES - 3 SECOND CHUNK ARCHITECTURE]
-  const aiDataMapRef = useRef({}); // ডাটাবেস সেভ করার জন্য
-  const backgroundScanSecRef = useRef(0); // ৩, ৬, ৯ সেকেন্ড ট্র্যাকার
-  const isAiProcessingRef = useRef(false); // স্ক্যানার রেস কন্ডিশন আটকানোর জন্য
+  const aiDataMapRef = useRef({}); 
+  const backgroundScanSecRef = useRef(0); 
+  const isAiProcessingRef = useRef(false); 
   
   const genderModelRef = useRef(null);
-  const snapshotRef = useRef(null);
+  const snapshotRef = useRef(null); 
 
   useEffect(() => {
     const setupAudio = async () => {
@@ -214,12 +211,10 @@ export default function GlobalPlayer() {
       
       setIsBlurred(false); 
       setBlurOverlayImage(null);
-      setAiVisionImage(null);
-      setFullFrameUri(null);
       
-      // 🚨 [RESET AI CHUNK DATABASE] নতুন ভিডিও প্লে হলে ডাটাবেস ক্লিয়ার করা হলো
+      // 🚨 নতুন ভিডিও প্লে হলে ডাটাবেস ক্লিয়ার
       aiDataMapRef.current = {};
-      backgroundScanSecRef.current = 0; // ০ সেকেন্ড থেকে শুরু
+      backgroundScanSecRef.current = 0; 
       isAiProcessingRef.current = false;
 
       setCurrentTime(0); setBuffered(0); scale.setValue(1); baseScaleRef.current = 1;
@@ -401,7 +396,6 @@ export default function GlobalPlayer() {
       }
   };
 
-  // 🚨 [SMART LOGIC] রিটার্ন করবে: 'w', 'm', বা 'none'
   const processFrameForGender = async (uri) => {
       try {
           const faces = await detectFacesWithMLKit(uri);
@@ -423,16 +417,11 @@ export default function GlobalPlayer() {
                       uri, [{ crop: { originX, originY, width, height } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
                   );
                   
-                  // 🚨 [AI VISION FIX] প্রথম মুখটি প্রিভিউ বক্সে দেখাবে
-                  if (i === 0) {
-                      setAiVisionImage(croppedFace.uri);
-                  }
-                  
                   const femaleProbability = await checkGenderWithTFLite(croppedFace.uri);
                   
                   if (femaleProbability >= 0.50) {
                       hasFemale = true;
-                      break; // একটি মেয়ে পেলেই আর স্ক্যান করবে না
+                      break; 
                   } else {
                       hasMale = true;
                   }
@@ -453,26 +442,34 @@ export default function GlobalPlayer() {
           if (!player || player.duration <= 0 || isAiProcessingRef.current || !videoSource) return;
           
           const duration = player.duration;
+          const currentPlaybackBlock = Math.floor(player.currentTime / 3) * 3;
+
+          // 🚨 [THE AUTO-SYNC JUMP FIX]
+          // যদি স্ক্যানার প্লেয়ারের চেয়ে পিছিয়ে পড়ে, তবে বর্তমান সময়ে লাফ দেবে
+          if (backgroundScanSecRef.current < currentPlaybackBlock) {
+              backgroundScanSecRef.current = currentPlaybackBlock;
+          }
+
           let targetSec = backgroundScanSecRef.current;
 
-          // ভিডিওর শেষ পর্যন্ত পৌঁছায়নি এমন সময়গুলোতে চেক করবে
           if (targetSec <= duration) {
+              // আগে স্ক্যান হয়ে থাকলে স্কিপ করবে
+              if (aiDataMapRef.current[targetSec] !== undefined) {
+                  backgroundScanSecRef.current += 3;
+                  return;
+              }
+
               isAiProcessingRef.current = true;
               try {
-                  // 🚨 [BUFFER-SAFE EXTRACTION]
-                  // generateThumbnailsAsync শুধু বাফার হওয়া অংশ থেকেই ফ্রেম আনতে পারে
                   const thumbs = await player.generateThumbnailsAsync([targetSec]);
-                  
                   if (thumbs && thumbs.length > 0) {
                       const result = await processFrameForGender(thumbs[0].uri);
                       
-                      // ডাটাবেসে ডেটা সেভ করা হচ্ছে
                       aiDataMapRef.current[targetSec] = {
                           status: result, // 'w', 'm', 'none'
-                          uri: thumbs[0].uri // ব্লার হিসেবে দেখানোর জন্য ছবিটিও সেভ রাখা হলো
+                          uri: thumbs[0].uri 
                       };
                       
-                      // 🚨 [STEP 3] টার্মিনালে ডাটাবেসের অবস্থা প্রিন্ট করা
                       let terminalLog = `\n--- 📊 AI DATA MAP (Loaded) ---\n`;
                       Object.keys(aiDataMapRef.current)
                           .map(Number)
@@ -482,21 +479,21 @@ export default function GlobalPlayer() {
                           });
                       console.log(terminalLog);
                       
-                      // সফল হলে পরবর্তী ৩ সেকেন্ডের জন্য ইনডেক্স বাড়ানো হলো
-                      backgroundScanSecRef.current += 3;
                   } else {
-                      // যদি থাম্বনেইল না পাওয়া যায়, তবে none সেভ হবে
                       aiDataMapRef.current[targetSec] = { status: 'none', uri: null };
-                      backgroundScanSecRef.current += 3;
                   }
+                  // কাজ সফল হোক বা না হোক, সামনে এগিয়ে যাবে আটকে থাকবে না
+                  backgroundScanSecRef.current += 3;
+                  
               } catch(e) {
-                  // Error মানে ভিডিও এখনো ততটুকু লোড (Buffer) হয়নি। তাই স্ক্যানার এখানেই অপেক্ষা করবে।
-                  // কোন ইনডেক্স বাড়ানো হবে না, ফলে বাফার হওয়া মাত্রই আবার এখান থেকে শুরু করবে।
+                  // 🚨 [ERROR FIX] ফ্রেম না পেলে আটকে না থেকে 'none' দিয়ে সামনে চলে যাবে
+                  aiDataMapRef.current[targetSec] = { status: 'none', uri: null };
+                  backgroundScanSecRef.current += 3;
               } finally {
                   isAiProcessingRef.current = false;
               }
           }
-      }, 500); // প্রতি ০.৫ সেকেন্ডে চেক করবে নতুন বাফার হলো কিনা
+      }, 300); // অতি দ্রুত স্ক্যান করবে
 
       return () => clearInterval(backgroundScanner);
   }, [player, videoSource]);
@@ -507,22 +504,18 @@ export default function GlobalPlayer() {
           if (!player || isAudioMode || !videoSource) return;
 
           const currentSec = player.currentTime;
-          // বর্তমান সময়কে ৩ এর গুণিতকে (Multiple of 3) ভাগ করা হচ্ছে 
-          // যেমন: ৭.৫ সেকেন্ড হলে সেটিকে ফ্লোর করে ৬ সেকেন্ডের ব্লকে ফেলা হবে (7.5/3 = 2.5 -> 2 * 3 = 6)
           const currentBucket = Math.floor(currentSec / 3) * 3;
           
           const chunkData = aiDataMapRef.current[currentBucket];
 
           if (chunkData && chunkData.status === 'w') {
-              // 🔴 এই ৩ সেকেন্ডের ব্লকে মহিলা আছে, তাই ব্লার অন করো!
               setIsBlurred(true);
               setBlurOverlayImage(chunkData.uri);
           } else {
-              // 🟢 এই ৩ সেকেন্ডের ব্লকে পুরুষ আছে বা কেউ নেই, ব্লার অফ করো!
               setIsBlurred(false);
           }
           
-      }, 200); // চোখের পলকে চেক করে আপডেট করবে
+      }, 200); 
 
       return () => clearInterval(displayUpdater);
   }, [player, isAudioMode, videoSource]);
@@ -656,7 +649,6 @@ export default function GlobalPlayer() {
             <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
                 {videoSource ? (
                     <>
-                        {/* 🚨 surfaceType="textureView" */}
                         <View ref={snapshotRef} collapsable={false} style={styles.video}>
                             <VideoView 
                                 player={player} 
@@ -668,7 +660,6 @@ export default function GlobalPlayer() {
                             />
                         </View>
                         
-                        {/* 🚨 Android Optical Illusion Blur */}
                         {isBlurred && blurOverlayImage && !isAudioMode && (
                             <View style={[StyleSheet.absoluteFillObject, { zIndex: 100, overflow: 'hidden' }]}>
                                 <Image 
@@ -681,13 +672,6 @@ export default function GlobalPlayer() {
                                     <Text style={{ color: '#FFF', fontSize: 18, fontWeight: 'bold', marginTop: 15 }}>মহিলা শনাক্ত হয়েছে</Text>
                                     <Text style={{ color: '#FFF', fontSize: 12, marginTop: 5 }}>(Censored by AI)</Text>
                                 </View>
-                            </View>
-                        )}
-
-                        {aiVisionImage && isInteractiveFull && (
-                            <View style={styles.debugWindow}>
-                                <Image source={{ uri: aiVisionImage }} style={{ flex: 1, width: '100%', height: '100%' }} resizeMode="contain" />
-                                <Text style={styles.debugText}>🤖 AI VISION</Text>
                             </View>
                         )}
                     </>
@@ -834,7 +818,5 @@ const styles = StyleSheet.create({
   sliderWrapper: { flex: 1, marginHorizontal: 8, justifyContent: 'center', position: 'relative', height: 40 }, customTrackContainer: { position: 'absolute', left: Platform.OS === 'android' ? 15 : 0, right: Platform.OS === 'android' ? 15 : 0, height: 3, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 2, overflow: 'hidden' }, bufferedBar: { height: '100%', backgroundColor: 'rgba(144, 238, 144, 0.8)', borderRadius: 2 },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' }, settingsMenu: { width: 250, backgroundColor: '#1A1A1A', borderRadius: 15, padding: 15, elevation: 10 }, modalTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 10, textAlign: 'center', borderBottomWidth: 1, borderBottomColor: '#333', paddingBottom: 10 }, menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#333' }, menuIcon: { marginRight: 10 }, menuText: { color: '#FFF', fontSize: 16 },
   fallbackOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center', padding: 20, zIndex: 30 }, fallbackText: { color: '#FFF', textAlign: 'center', marginVertical: 20, fontSize: 16 }, btn: { backgroundColor: '#FF0000', paddingHorizontal: 25, paddingVertical: 12, borderRadius: 10 }, btnText: { color: '#FFF', fontWeight: 'bold' },
-  miniTouchableArea: { flex: 1, width: '100%', height: '100%', position: 'absolute', zIndex: 50 }, miniControlsRow: { position: 'absolute', top: 5, right: 5, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 15, paddingHorizontal: 5, paddingVertical: 2, alignItems: 'center' }, miniCtrlBtn: { padding: 5, marginHorizontal: 3 },
-  debugWindow: { position: 'absolute', top: 80, right: 20, width: 100, height: 150, backgroundColor: '#000', borderWidth: 2, borderColor: '#FF0000', zIndex: 100, elevation: 10 },
-  debugText: { color: '#FFF', fontSize: 10, fontWeight: 'bold', textAlign: 'center', backgroundColor: '#FF0000', padding: 2 }
+  miniTouchableArea: { flex: 1, width: '100%', height: '100%', position: 'absolute', zIndex: 50 }, miniControlsRow: { position: 'absolute', top: 5, right: 5, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 15, paddingHorizontal: 5, paddingVertical: 2, alignItems: 'center' }, miniCtrlBtn: { padding: 5, marginHorizontal: 3 }
 });
