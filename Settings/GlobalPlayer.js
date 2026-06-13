@@ -13,9 +13,6 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import * as WebBrowser from 'expo-web-browser'; 
 import AsyncStorage from '@react-native-async-storage/async-storage'; 
 
-// 🚨 [THE INTERNET SOLUTION] স্বাধীন ফ্রেম এক্সট্রাক্টর
-import * as VideoThumbnails from 'expo-video-thumbnails';
-
 // 🚨 [REAL AI INTEGRATION PACKAGES]
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy'; 
@@ -53,8 +50,6 @@ export default function GlobalPlayer() {
   
   const scale = useRef(new Animated.Value(1)).current;
   const baseScaleRef = useRef(1);
-  const isZoomingRef = useRef(false);
-  const initialDistanceRef = useRef(null);
   
   const lastTapRef = useRef({ time: 0, side: '' });
   const tapTimeoutRef = useRef(null);
@@ -85,11 +80,10 @@ export default function GlobalPlayer() {
 
   const isAudioModeRef = useRef(false);
   const streamModeRef = useRef('combined');
-  const cachedAudioUrlRef = useRef(null); 
   const isSyncingRef = useRef(false);
   const pendingSeekRef = useRef(null); 
 
-  // 🚨 [NEW] BACKGROUND SCANNER STATES (For Terminal Map Only)
+  // 🚨 [BACKGROUND SCANNER STATES]
   const aiDataMapRef = useRef({}); 
   const targetScanSecRef = useRef(0); 
   const isAiProcessingRef = useRef(false); 
@@ -188,7 +182,7 @@ export default function GlobalPlayer() {
       setPlayerState('full');
       setStreamUrl(null); setVideoSource(null); resumeTimeRef.current = 0; 
       
-      // 🚨 স্ক্যানার ম্যাপ রিসেট
+      // 🚨 নতুন ভিডিও শুরু হলে স্ক্যানার ম্যাপ রিসেট
       aiDataMapRef.current = {};
       targetScanSecRef.current = 0; 
       isAiProcessingRef.current = false;
@@ -339,60 +333,94 @@ export default function GlobalPlayer() {
       }
   };
 
-  // 🚨 [THE INTERNET SOLUTION] সম্পূর্ণ স্বাধীন ব্যাকগ্রাউন্ড স্ক্যানার
+  // 🚨 [THE PERFECT SOLUTION: 2-SEC INITIAL DELAY + SAFE QUEUE]
   useEffect(() => {
-      const bufferScanner = setInterval(async () => {
-          // ভিডিও সোর্স না থাকলে স্ক্যান করবে না
-          if (!videoSource || isAiProcessingRef.current) return;
-          
-          let targetSec = targetScanSecRef.current;
+      let isQueueActive = true;
 
-          // প্লেয়ার রেডি থাকলে ডিউরেশন চেক করবে
-          if (duration > 0 && targetSec > duration) {
-              return; // ভিডিওর শেষ পর্যন্ত ফ্রেম নেওয়া হয়ে গেছে
-          }
-
-          isAiProcessingRef.current = true;
-
-          try {
-              // 🚨 ভিডিও প্লেয়ারের ওপর নির্ভর না করে সরাসরি URL থেকে ফ্রেম কাটা
-              // time-এর ভ্যালু মিলি-সেকেন্ডে দিতে হয় (তাই 1000 দিয়ে গুণ)
-              const { uri } = await VideoThumbnails.getThumbnailAsync(videoSource, {
-                  time: targetSec * 1000, 
-                  quality: 0.5,
-              });
-
-              if (uri) {
-                  // এআই চেক
-                  const result = await processFrameForGender(uri);
-                  
-                  // ম্যাপে সেভ করা
-                  aiDataMapRef.current[targetSec] = result;
-                  
-                  // টার্মিনালে সুন্দর করে প্রিন্ট করা
-                  let terminalLog = `\n--- 📊 AI DATA MAP (Independent Extraction) ---\n`;
-                  Object.keys(aiDataMapRef.current)
-                      .map(Number)
-                      .sort((a,b) => a - b)
-                      .forEach(timeKey => {
-                          terminalLog += `${timeKey}-${aiDataMapRef.current[timeKey]}\n`;
-                      });
-                  console.log(terminalLog);
-                  
-                  // সফল হওয়ায় পরবর্তী ৩ সেকেন্ডে চলে গেল
-                  targetScanSecRef.current += 3;
+      const processQueue = async () => {
+          // ১. 🚨 প্রথম শর্ত: ভিডিও প্লে হওয়ার জন্য অপেক্ষা করবে
+          while (isQueueActive) {
+              if (player && player.playing && player.duration > 0) {
+                  break; // ভিডিও প্লে হওয়া শুরু হয়েছে!
               }
-          } catch(e) {
-              // যদি ফ্রেম না পায় (মানে ভিডিওর ওই অংশ ইন্টারনেট থেকে এখনো লোড হয়নি)
-              // console.log(`⏳ [${targetSec}s] Video chunk not ready yet... Waiting...`);
-          } finally {
-              isAiProcessingRef.current = false;
+              await new Promise(r => setTimeout(r, 500)); // না হলে আধা সেকেন্ড পর পর চেক করবে
           }
-          
-      }, 2000); // প্রতি ২ সেকেন্ডে একবার ট্রাই করবে
 
-      return () => clearInterval(bufferScanner);
-  }, [videoSource, duration]);
+          if (!isQueueActive) return;
+
+          // ২. 🚨 আপনার মাস্টারস্ট্রোক লজিক: ভিডিও প্লে হওয়ার পর পাক্কা ২ সেকেন্ড এআই চুপ করে বসে থাকবে!
+          console.log("⏸️ Video has started! AI is taking a 2-second breathing break...");
+          await new Promise(r => setTimeout(r, 2000));
+
+          // ৩. ২ সেকেন্ড বিশ্রামের পর এবার এআই তার কাজ (স্ক্যানিং) শুরু করবে
+          console.log("▶️ AI Breathing complete. Scanning started...");
+
+          while (isQueueActive) {
+              if (!player || !videoSource) break;
+
+              const currentPlaybackSec = player.currentTime;
+              const duration = player.duration;
+              let targetSec = targetScanSecRef.current;
+
+              if (targetSec > duration) {
+                  await new Promise(r => setTimeout(r, 2000));
+                  continue;
+              }
+
+              // বাফার প্রটেকশন: বর্তমান সময়ের চেয়ে ১৫ সেকেন্ডের বেশি স্ক্যান করবে না
+              if (targetSec > currentPlaybackSec + 15) {
+                  await new Promise(r => setTimeout(r, 1000));
+                  continue;
+              }
+
+              // আগে স্ক্যান করা থাকলে স্কিপ করবে
+              if (aiDataMapRef.current[targetSec] !== undefined) {
+                  targetScanSecRef.current += 3;
+                  continue;
+              }
+
+              isAiProcessingRef.current = true;
+              try {
+                  // ৪. ভিডিও ইঞ্জিনের ওপর চাপ না দিয়ে ২ সেকেন্ডের টাইমআউটে ফ্রেম কাটা
+                  const extractPromise = player.generateThumbnailsAsync([targetSec]);
+                  const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 2000));
+                  
+                  const thumbs = await Promise.race([extractPromise, timeoutPromise]);
+
+                  if (thumbs && thumbs.length > 0) {
+                      const result = await processFrameForGender(thumbs[0].uri);
+                      aiDataMapRef.current[targetSec] = result;
+                      
+                      // 📊 টার্মিনালে ডাটা ম্যাপ প্রিন্ট
+                      let terminalLog = `\n--- 📊 AI DATA MAP ---\n`;
+                      Object.keys(aiDataMapRef.current)
+                          .map(Number)
+                          .sort((a,b) => a - b)
+                          .forEach(timeKey => {
+                              terminalLog += `${timeKey}-${aiDataMapRef.current[timeKey]}\n`;
+                          });
+                      console.log(terminalLog);
+                      
+                      targetScanSecRef.current += 3;
+                  } else {
+                      aiDataMapRef.current[targetSec] = 'none';
+                      targetScanSecRef.current += 3;
+                  }
+              } catch(e) {
+                  // TIMEOUT: ফ্রেম এখনো বাফার হয়নি। অপেক্ষা করবে।
+              } finally {
+                  isAiProcessingRef.current = false;
+              }
+
+              // ৫. 🚨 একটি ফ্রেম প্রসেস করার পর আবার ১ সেকেন্ডের "Breathing Time" (নিঃশ্বাস নেওয়ার সময়)
+              await new Promise(r => setTimeout(r, 1000));
+          }
+      };
+
+      processQueue();
+
+      return () => { isQueueActive = false; };
+  }, [player, videoSource]);
 
   // 🤖 -------------------- AI ENGINE END -------------------- 🤖
 
@@ -498,5 +526,5 @@ const styles = StyleSheet.create({
   tapOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', zIndex: 5 }, tapHalf: { flex: 1 }, controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
   centerRow: { flexDirection: 'row', alignItems: 'center', zIndex: 20 }, bottomBar: { position: 'absolute', bottom: 5, width: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, zIndex: 20 },
   timeTextLeft: { color: '#FFF', fontSize: 13, fontWeight: 'bold', minWidth: 40, textAlign: 'center' }, timeTextRight: { color: '#FFF', fontSize: 13, fontWeight: 'bold', minWidth: 40, textAlign: 'center' },
-  sliderWrapper: { flex: 1, marginHorizontal: 8, justifyContent: 'center', position: 'relative', height: 40 }, customTrackContainer: { position: 'absolute', left: Platform.OS === 'android' ? 15 : 0, right: Platform.OS === 'android' ? 15 : 0, height: 3, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 2, overflow: 'hidden' }, bufferedBar: { height: '100%', backgroundColor: 'rgba(144, 238, 144, 0.8)', borderRadius: 2 }, miniTouchableArea: { flex: 1, width: '100%', height: '100%', position: 'absolute', zIndex: 50 }, miniControlsRow: { position: 'absolute', top: 5, right: 5, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 15, paddingHorizontal: 5, paddingVertical: 2, alignItems: 'center' }, miniCtrlBtn: { padding: 5, marginHorizontal: 3 }
+  sliderWrapper: { flex: 1, marginHorizontal: 8, justifyContent: 'center', position: 'relative', height: 40 }, miniTouchableArea: { flex: 1, width: '100%', height: '100%', position: 'absolute', zIndex: 50 }, miniControlsRow: { position: 'absolute', top: 5, right: 5, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 15, paddingHorizontal: 5, paddingVertical: 2, alignItems: 'center' }, miniCtrlBtn: { padding: 5, marginHorizontal: 3 }
 });
