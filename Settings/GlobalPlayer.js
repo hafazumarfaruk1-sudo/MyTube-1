@@ -15,7 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // 🚨 [REAL AI INTEGRATION PACKAGES]
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as FileSystem from 'expo-file-system/legacy'; 
+import * as FileSystem from 'expo-file-system'; 
 import { decode } from 'base64-arraybuffer'; 
 import * as jpeg from 'jpeg-js';
 import { Asset } from 'expo-asset'; 
@@ -62,7 +62,6 @@ export default function GlobalPlayer() {
   const [streamUrl, setStreamUrl] = useState(null);
   const [videoSource, setVideoSource] = useState(null); 
   
-  // 🚨 [NEW] স্টোরিবোর্ড (Sprite) লিংক সেভ রাখার জন্য
   const [storyboardUrlTemplate, setStoryboardUrlTemplate] = useState(null);
 
   const [streamMode, setStreamMode] = useState('combined');
@@ -207,7 +206,6 @@ export default function GlobalPlayer() {
       const json = await res.json();
       if (fetchId !== fetchIdRef.current) return;
       if (json.success && json.url) {
-          // 🚨 স্টোরিবোর্ডের লিংক সেভ করা হচ্ছে
           if (json.storyboardUrl) {
               setStoryboardUrlTemplate(json.storyboardUrl);
           }
@@ -219,6 +217,11 @@ export default function GlobalPlayer() {
   const startPlayback = async (json) => {
     setStreamMode(json.streamType || 'combined'); streamModeRef.current = json.streamType || 'combined';
     setStreamUrl(json.url); setVideoSource(json.url); 
+    
+    // 🚨 [FIX] ভিডিও লোড হওয়ার সাথে সাথে অটো-প্লে ট্রিগার করা হলো
+    setTimeout(() => {
+        if (player) safePlay(player);
+    }, 1000);
   };
 
 
@@ -252,6 +255,7 @@ export default function GlobalPlayer() {
               croppedFaceUri, [{ resize: { width: MODEL_WIDTH, height: MODEL_HEIGHT } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
           );
 
+          // 🚨 FileSystem.readAsStringAsync এর জন্য legacy import ব্যবহার না করাই ভালো
           const base64Data = await FileSystem.readAsStringAsync(resizedImage.uri, { encoding: FileSystem.EncodingType.Base64 });
           const rawBuffer = new Uint8Array(decode(base64Data));
           const rawImageData = jpeg.decode(rawBuffer, { useTArray: true });
@@ -339,21 +343,33 @@ export default function GlobalPlayer() {
       }
   };
 
-  // 🚨 [THE ZERO-DATA SPRITE SOLUTION]
+  // 🚨 [THE ZERO-DATA + CACHED SPRITE SOLUTION]
   const SB_COLS = 5;
   const SB_ROWS = 5;
   const SB_FRAME_W = 160;
   const SB_FRAME_H = 90;
-  const SB_INTERVAL = 2; // ইউটিউব ২ সেকেন্ড পরপর ফ্রেম বানায়
-  const SB_FRAMES_PER_CHUNK = SB_COLS * SB_ROWS; // একটি ছবিতে ২৫টি ফ্রেম
-  const SB_CHUNK_DURATION = SB_FRAMES_PER_CHUNK * SB_INTERVAL; // ৫০ সেকেন্ডের ডেটা ১টি ছবিতে
+  const SB_INTERVAL = 2; 
+  const SB_FRAMES_PER_CHUNK = SB_COLS * SB_ROWS; 
+  const SB_CHUNK_DURATION = SB_FRAMES_PER_CHUNK * SB_INTERVAL; 
 
   useEffect(() => {
       let isQueueActive = true;
 
       const processQueue = async () => {
+          
+          // ১. ভিডিও প্লে হওয়া পর্যন্ত অপেক্ষা করবে
           while (isQueueActive) {
-              // স্টোরিবোর্ডের লিংক না পাওয়া পর্যন্ত অপেক্ষা করবে
+              if (player && player.playing && player.duration > 0) break;
+              await new Promise(r => setTimeout(r, 500));
+          }
+
+          if (!isQueueActive) return;
+
+          // ২. ভিডিও প্লেয়ারকে বাফার করার জন্য ২ সেকেন্ড সময় দেওয়া হলো
+          console.log("⏸️ Video started! Giving player 2s to buffer...");
+          await new Promise(r => setTimeout(r, 2000));
+
+          while (isQueueActive) {
               if (!storyboardUrlTemplate || !videoSource) {
                   await new Promise(r => setTimeout(r, 1000));
                   continue;
@@ -368,13 +384,11 @@ export default function GlobalPlayer() {
                   continue;
               }
 
-              // বাফার রুল: ইউজারের থেকে ১৫ সেকেন্ড সামনে স্ক্যান করবে
               if (targetSec > currentPlaybackSec + 15) {
                   await new Promise(r => setTimeout(r, 1000));
                   continue;
               }
 
-              // আগে স্ক্যান করা থাকলে স্কিপ করবে
               if (aiDataMapRef.current[targetSec] !== undefined) {
                   targetScanSecRef.current += SB_INTERVAL;
                   continue;
@@ -382,33 +396,39 @@ export default function GlobalPlayer() {
 
               isAiProcessingRef.current = true;
               try {
-                  // 🚨 THE MAGIC MATH: ফ্রেমের পজিশন হিসাব করা হচ্ছে
-                  const chunkNumber = Math.floor(targetSec / SB_CHUNK_DURATION); // কোন ছবির গ্রিড?
-                  const timeInChunk = targetSec % SB_CHUNK_DURATION; // ওই ছবির ভেতর কত সেকেন্ড?
-                  const indexInChunk = Math.floor(timeInChunk / SB_INTERVAL); // ওই ছবির কত নম্বর ফ্রেম?
+                  const chunkNumber = Math.floor(targetSec / SB_CHUNK_DURATION); 
+                  const timeInChunk = targetSec % SB_CHUNK_DURATION; 
+                  const indexInChunk = Math.floor(timeInChunk / SB_INTERVAL); 
                   
-                  const col = indexInChunk % SB_COLS; // কলাম (X)
-                  const row = Math.floor(indexInChunk / SB_COLS); // সারি (Y)
+                  const col = indexInChunk % SB_COLS; 
+                  const row = Math.floor(indexInChunk / SB_COLS); 
                   
                   const cropX = col * SB_FRAME_W;
                   const cropY = row * SB_FRAME_H;
                   
-                  // সঠিক গ্রিড ছবির লিংক তৈরি (যেমন 0.jpg, 1.jpg)
                   const currentGridUrl = storyboardUrlTemplate.replace('$M', chunkNumber).replace('$L', '0').replace('$N', '0');
 
-                  // 🚨 ভিডিও প্লেয়ার ছাড়া সরাসরি ছবি থেকে ফ্রেম কাটা!
+                  // 🚨 [NETWORK FIX]: ডাউনলোড ক্যাশিং
+                  const localChunkPath = `${FileSystem.cacheDirectory}sb_chunk_${chunkNumber}.jpg`;
+                  const chunkInfo = await FileSystem.getInfoAsync(localChunkPath);
+
+                  // যদি ছবিটি ফোনে না থাকে, তবেই শুধু একবার ডাউনলোড করবে
+                  if (!chunkInfo.exists) {
+                      console.log(`📥 Downloading Sprite Chunk ${chunkNumber} ONCE...`);
+                      await FileSystem.downloadAsync(currentGridUrl, localChunkPath);
+                  }
+
+                  // 🚨 ইন্টারনেট থেকে নয়, লোকাল মেমোরি থেকে ফ্রেম কাটা হচ্ছে!
                   const croppedFrame = await ImageManipulator.manipulateAsync(
-                      currentGridUrl, 
+                      localChunkPath, 
                       [{ crop: { originX: cropX, originY: cropY, width: SB_FRAME_W, height: SB_FRAME_H } }], 
                       { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
                   );
 
-                  // এআই চেক
                   const result = await processFrameForGender(croppedFrame.uri);
                   aiDataMapRef.current[targetSec] = result;
                   
-                  // টার্মিনালে ম্যাথ এবং রেজাল্ট প্রিন্ট
-                  let terminalLog = `\n--- 📊 AI DATA MAP (Zero-Data Sprite) ---\n`;
+                  let terminalLog = `\n--- 📊 AI DATA MAP (Local Cached Sprite) ---\n`;
                   terminalLog += `Target: ${targetSec}s | Image Chunk: ${chunkNumber} | Cut Pos: (X:${cropX}, Y:${cropY})\n`;
                   Object.keys(aiDataMapRef.current)
                       .map(Number)
@@ -419,14 +439,14 @@ export default function GlobalPlayer() {
                   console.log(terminalLog);
                   
               } catch(e) {
-                  console.log(`❌ Sprite Crop Error at ${targetSec}s:`, e.message);
+                  console.log(`❌ Frame Error at ${targetSec}s:`, e.message);
               } finally {
                   isAiProcessingRef.current = false;
                   targetScanSecRef.current += SB_INTERVAL;
               }
 
-              // ভিডিও ইঞ্জিনের সাথে কোনো সম্পর্ক নেই, তাই চোখের পলকে কাজ করতে পারবে!
-              await new Promise(r => setTimeout(r, 100)); 
+              // ইঞ্জিনকে নিঃশ্বাস নেওয়ার সময় দেওয়া হলো
+              await new Promise(r => setTimeout(r, 500)); 
           }
       };
 
