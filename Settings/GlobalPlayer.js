@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, BackHandler } from 'react-native';
+import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, BackHandler, Platform } from 'react-native';
 
 // 🚨 [LATEST PACKAGES]
 import { useVideoPlayer, VideoView } from 'expo-video'; 
@@ -12,7 +12,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 
 // 🚨 [REAL AI INTEGRATION PACKAGES]
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as FileSystem from 'expo-file-system/legacy'; // 🚨 Legacy Import Maintained
+import * as FileSystem from 'expo-file-system/legacy'; 
 import { decode } from 'base64-arraybuffer'; 
 import * as jpeg from 'jpeg-js';
 import { Asset } from 'expo-asset'; 
@@ -46,7 +46,6 @@ export default function GlobalPlayer() {
   const [streamUrl, setStreamUrl] = useState(null);
   const [videoSource, setVideoSource] = useState(null); 
   
-  // 🚨 টারমাক্সের জন্য 144p এর লিংক
   const [lowStreamUrl, setLowStreamUrl] = useState(null);
 
   const [currentTime, setCurrentTime] = useState(0);
@@ -58,7 +57,6 @@ export default function GlobalPlayer() {
 
   const isSyncingRef = useRef(false);
 
-  // 🚨 AI ডেটা ম্যাপে এখন ফ্রেমের সাইজও থাকবে
   const aiDataMapRef = useRef({}); 
   const targetScanSecRef = useRef(0); 
   const isAiProcessingRef = useRef(false); 
@@ -220,7 +218,7 @@ export default function GlobalPlayer() {
       } catch (error) { return 'none'; }
   };
 
-  // 🚨 [FULL VIDEO SCANNER: WITH SIZE MEASUREMENT]
+  // 🚨 [FULL VIDEO SCANNER: NO LIMITS, FULL SPEED, FILE SIZE TRACKING]
   useEffect(() => {
       let isQueueActive = true;
 
@@ -246,7 +244,6 @@ export default function GlobalPlayer() {
               let targetSec = targetScanSecRef.current;
               const vDuration = player ? player.duration : 0;
 
-              // ভিডিও স্ক্যানিং শেষ হয়ে গেলে চুপ করে বসে থাকবে
               if (vDuration > 0 && targetSec > vDuration) {
                   await new Promise(r => setTimeout(r, 5000));
                   continue;
@@ -264,23 +261,23 @@ export default function GlobalPlayer() {
 
                   if (data.success && data.frameUrl) {
                       
-                      // 🚨 ১. ফ্রেম ডাউনলোড করে সাইজ বের করা
+                      // 🚨 ১. ফ্রেম টেম্পোরারি সেভ করে সাইজ বের করা
                       const tempLocalPath = `${FileSystem.cacheDirectory}temp_frame_${targetSec}.jpg`;
                       await FileSystem.downloadAsync(data.frameUrl, tempLocalPath);
                       const fileInfo = await FileSystem.getInfoAsync(tempLocalPath);
                       
                       let sizeKB = "0.00";
                       if (fileInfo.exists) {
-                          sizeKB = (fileInfo.size / 1024).toFixed(2); // বাইট থেকে কিলোবাইটে কনভার্ট
+                          sizeKB = (fileInfo.size / 1024).toFixed(2);
                       }
 
-                      // 🚨 ২. ডাউনলোড করা ফ্রেম থেকে এআই রেজাল্ট বের করা
+                      // 🚨 ২. এআই রেজাল্ট
                       const result = await processFrameForGender(tempLocalPath);
                       
-                      // 🚨 ৩. ম্যাপে রেজাল্ট এবং সাইজ সেভ করা
+                      // 🚨 ৩. ম্যাপ আপডেট (সাইজ সহ)
                       aiDataMapRef.current[targetSec] = { gender: result, size: sizeKB };
                       
-                      // 🚨 ৪. টার্মিনালে সুন্দর করে প্রিন্ট করা
+                      // 🚨 ৪. টার্মিনালে সুন্দর করে ফুল ম্যাপ প্রিন্ট
                       let terminalLog = `\n--- 📊 AI DATA MAP (FFmpeg 144p + Size) ---\n`;
                       Object.keys(aiDataMapRef.current).map(Number).sort((a,b) => a - b).forEach(timeKey => {
                           const entry = aiDataMapRef.current[timeKey];
@@ -288,18 +285,18 @@ export default function GlobalPlayer() {
                       });
                       console.log(terminalLog);
                       
-                      // 🚨 ৫. ফোন মেমোরি বাঁচানোর জন্য ছবি ডিলিট করা
+                      // 🚨 ৫. মেমোরি ক্লিয়ার করা
                       await FileSystem.deleteAsync(tempLocalPath, { idempotent: true });
 
                       targetScanSecRef.current += 3;
                   }
               } catch(e) {
-                  // Error handling silently to keep the engine running fast
+                  // Error handled silently for speed
               } finally {
                   isAiProcessingRef.current = false;
               }
 
-              // কোনো ১৫ সেকেন্ডের ব্রেক নেই! মাত্র ১০০ মিলি-সেকেন্ড গ্যাপ দিয়ে একটানা স্ক্যান চলবে!
+              // কোনো ১৫ সেকেন্ডের ব্রেক নেই!
               await new Promise(r => setTimeout(r, 100)); 
           }
       };
@@ -381,6 +378,9 @@ export default function GlobalPlayer() {
              <View style={styles.bottomBar}>
                 <Text style={styles.timeTextLeft}>{formatTime(currentTime)}</Text>
                 <View style={styles.sliderWrapper}>
+                    <View style={styles.customTrackContainer}>
+                        {/* Custom Track logic is safe here now since Platform is imported */}
+                    </View>
                     <Slider style={{ flex: 1, height: 40 }} minimumValue={0} maximumValue={duration} value={currentTime} onValueChange={(v) => setCurrentTime(v)} onSlidingComplete={async (v) => { await seekTo(v); triggerControls(); }} minimumTrackTintColor="#FF0000" maximumTrackTintColor="transparent" thumbTintColor="#FF0000" />
                 </View>
                 <Text style={styles.timeTextRight}>{formatTime(duration)}</Text>
