@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, BackHandler, Platform } from 'react-native';
+import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, BackHandler, ScrollView, Image } from 'react-native';
 
 // 🚨 [LATEST PACKAGES]
 import { useVideoPlayer, VideoView } from 'expo-video'; 
@@ -57,6 +57,9 @@ export default function GlobalPlayer() {
 
   const isSyncingRef = useRef(false);
 
+  // 🚨 [NEW STATE]: UI-তে স্টোরিবোর্ড দেখানোর জন্য ফ্রেমগুলোর লিস্ট
+  const [frameList, setFrameList] = useState([]);
+
   const aiDataMapRef = useRef({}); 
   const targetScanSecRef = useRef(0); 
   const isAiProcessingRef = useRef(false); 
@@ -78,7 +81,7 @@ export default function GlobalPlayer() {
   const triggerControls = () => {
     setShowControls(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-    controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 3000);
+    controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 4000);
   };
 
   useEffect(() => {
@@ -129,6 +132,7 @@ export default function GlobalPlayer() {
       aiDataMapRef.current = {};
       targetScanSecRef.current = 0; 
       isAiProcessingRef.current = false;
+      setFrameList([]); // 🚨 নতুন ভিডিও প্লে হলে গ্যালারি মুছে ফেলা হবে
 
       setCurrentTime(0); setDuration(0); scale.setValue(1); 
       triggerControls();
@@ -218,12 +222,11 @@ export default function GlobalPlayer() {
       } catch (error) { return 'none'; }
   };
 
-  // 🚨 [FULL VIDEO SCANNER: NO LIMITS, FULL SPEED, FILE SIZE TRACKING]
+  // 🚨 [RAPID SCANNER & UI UPDATER]
   useEffect(() => {
       let isQueueActive = true;
 
       const processQueue = async () => {
-          
           while (isQueueActive) {
               if (player && player.playing && player.duration > 0) break;
               await new Promise(r => setTimeout(r, 500));
@@ -233,7 +236,7 @@ export default function GlobalPlayer() {
 
           console.log("⏸️ Video started! Giving player 2s to buffer...");
           await new Promise(r => setTimeout(r, 2000));
-          console.log("🚀 AI Scanner Engine Started for the ENTIRE VIDEO...");
+          console.log("🚀 Storyboard Engine Started...");
 
           while (isQueueActive) {
               if (!lowStreamUrl || !videoSource) {
@@ -261,42 +264,35 @@ export default function GlobalPlayer() {
 
                   if (data.success && data.frameUrl) {
                       
-                      // 🚨 ১. ফ্রেম টেম্পোরারি সেভ করে সাইজ বের করা
+                      // এআই এর কাজের জন্য ফোনে টেম্পোরারি সেভ
                       const tempLocalPath = `${FileSystem.cacheDirectory}temp_frame_${targetSec}.jpg`;
                       await FileSystem.downloadAsync(data.frameUrl, tempLocalPath);
-                      const fileInfo = await FileSystem.getInfoAsync(tempLocalPath);
                       
-                      let sizeKB = "0.00";
-                      if (fileInfo.exists) {
-                          sizeKB = (fileInfo.size / 1024).toFixed(2);
-                      }
-
-                      // 🚨 ২. এআই রেজাল্ট
+                      // এআই চেক
                       const result = await processFrameForGender(tempLocalPath);
                       
-                      // 🚨 ৩. ম্যাপ আপডেট (সাইজ সহ)
-                      aiDataMapRef.current[targetSec] = { gender: result, size: sizeKB };
+                      // ম্যাপে ডেটা সেভ
+                      aiDataMapRef.current[targetSec] = { gender: result };
                       
-                      // 🚨 ৪. টার্মিনালে সুন্দর করে ফুল ম্যাপ প্রিন্ট
-                      let terminalLog = `\n--- 📊 AI DATA MAP (FFmpeg 144p + Size) ---\n`;
-                      Object.keys(aiDataMapRef.current).map(Number).sort((a,b) => a - b).forEach(timeKey => {
-                          const entry = aiDataMapRef.current[timeKey];
-                          terminalLog += `${timeKey}s : [${entry.gender}] - Size: ${entry.size} KB\n`;
+                      // 🚨 [NEW] UI-তে দেখানোর জন্য ফ্রেম লিস্ট আপডেট করা
+                      setFrameList(prev => {
+                          const updated = [...prev, { time: targetSec, url: data.frameUrl, gender: result }];
+                          return updated.sort((a, b) => a.time - b.time); // সময় অনুযায়ী সাজানো
                       });
-                      console.log(terminalLog);
+
+                      console.log(`✅ Pinned [${targetSec}s] to Storyboard -> Result: [${result}]`);
                       
-                      // 🚨 ৫. মেমোরি ক্লিয়ার করা
+                      // ডিলিট করে ফোন খালি করা (UI সার্ভারের লিংক থেকে ছবি দেখাবে)
                       await FileSystem.deleteAsync(tempLocalPath, { idempotent: true });
 
                       targetScanSecRef.current += 3;
                   }
               } catch(e) {
-                  // Error handled silently for speed
+                  // Ignore
               } finally {
                   isAiProcessingRef.current = false;
               }
 
-              // কোনো ১৫ সেকেন্ডের ব্রেক নেই!
               await new Promise(r => setTimeout(r, 100)); 
           }
       };
@@ -375,16 +371,45 @@ export default function GlobalPlayer() {
                 </TouchableOpacity>
              </View>
 
-             <View style={styles.bottomBar}>
-                <Text style={styles.timeTextLeft}>{formatTime(currentTime)}</Text>
-                <View style={styles.sliderWrapper}>
-                    <View style={styles.customTrackContainer}>
-                        {/* Custom Track logic is safe here now since Platform is imported */}
+             <View style={styles.bottomBarWrapper}>
+                
+                {/* 🚨 [NEW] STORYBOARD GALLERY */}
+                {frameList.length > 0 && (
+                    <ScrollView 
+                        horizontal 
+                        showsHorizontalScrollIndicator={false} 
+                        style={styles.storyboardContainer}
+                        contentContainerStyle={{ paddingHorizontal: 15 }}
+                    >
+                        {frameList.map((frame, index) => (
+                            <TouchableOpacity 
+                                key={index} 
+                                style={styles.frameItem} 
+                                onPress={() => seekTo(frame.time)} // ফ্রেমে ক্লিক করলে ভিডিও সেখানে যাবে
+                            >
+                                <Image source={{ uri: frame.url }} style={styles.frameImg} />
+                                <View style={styles.frameTimeBox}>
+                                    <Text style={styles.frameTimeText}>{formatTime(frame.time)}</Text>
+                                </View>
+                                {/* এআই ব্যাজ */}
+                                {frame.gender !== 'none' && (
+                                    <View style={[styles.badge, frame.gender === 'w' ? styles.badgeW : styles.badgeM]}>
+                                        <Text style={styles.badgeText}>{frame.gender === 'w' ? 'W' : 'M'}</Text>
+                                    </View>
+                                )}
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                )}
+
+                <View style={styles.bottomBar}>
+                    <Text style={styles.timeTextLeft}>{formatTime(currentTime)}</Text>
+                    <View style={styles.sliderWrapper}>
+                        <Slider style={{ flex: 1, height: 40 }} minimumValue={0} maximumValue={duration} value={currentTime} onValueChange={(v) => setCurrentTime(v)} onSlidingComplete={async (v) => { await seekTo(v); triggerControls(); }} minimumTrackTintColor="#FF0000" maximumTrackTintColor="transparent" thumbTintColor="#FF0000" />
                     </View>
-                    <Slider style={{ flex: 1, height: 40 }} minimumValue={0} maximumValue={duration} value={currentTime} onValueChange={(v) => setCurrentTime(v)} onSlidingComplete={async (v) => { await seekTo(v); triggerControls(); }} minimumTrackTintColor="#FF0000" maximumTrackTintColor="transparent" thumbTintColor="#FF0000" />
+                    <Text style={styles.timeTextRight}>{formatTime(duration)}</Text>
+                    <TouchableOpacity style={{marginLeft: 12}} onPress={toggleFullscreen}><Ionicons name={isFullscreen ? "contract" : "expand"} size={22} color="#FFF" /></TouchableOpacity>
                 </View>
-                <Text style={styles.timeTextRight}>{formatTime(duration)}</Text>
-                <TouchableOpacity style={{marginLeft: 12}} onPress={toggleFullscreen}><Ionicons name={isFullscreen ? "contract" : "expand"} size={22} color="#FFF" /></TouchableOpacity>
              </View>
           </View>
         )}
@@ -408,7 +433,22 @@ const styles = StyleSheet.create({
   miniContainer: { position: 'absolute', bottom: 100, right: 20, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', borderRadius: 15, overflow: 'hidden', elevation: 10, borderWidth: 1, borderColor: '#00FF00' },
   videoWrapper: { flex: 1, justifyContent: 'center', width: '100%', height: '100%' }, animatedVideoWrapper: { flex: 1, width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }, video: { flex: 1, width: '100%', height: '100%' },
   tapOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', zIndex: 5 }, tapHalf: { flex: 1 }, controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
-  centerRow: { flexDirection: 'row', alignItems: 'center', zIndex: 20 }, bottomBar: { position: 'absolute', bottom: 5, width: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, zIndex: 20 },
+  centerRow: { flexDirection: 'row', alignItems: 'center', zIndex: 20 }, 
+  
+  bottomBarWrapper: { position: 'absolute', bottom: 5, width: '100%', zIndex: 20, flexDirection: 'column' },
+  bottomBar: { width: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15 },
+  
+  // 🚨 [NEW] Storyboard Styles
+  storyboardContainer: { marginBottom: 5, height: 75, width: '100%' },
+  frameItem: { width: 100, height: 60, marginRight: 8, borderRadius: 8, overflow: 'hidden', backgroundColor: '#333', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', position: 'relative' },
+  frameImg: { width: '100%', height: '100%', resizeMode: 'cover' },
+  frameTimeBox: { position: 'absolute', bottom: 2, right: 4, backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1 },
+  frameTimeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
+  badge: { position: 'absolute', top: 2, left: 4, borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, elevation: 5 },
+  badgeW: { backgroundColor: '#FF1493' }, // পিংক কালার (Female)
+  badgeM: { backgroundColor: '#1E90FF' }, // ব্লু কালার (Male)
+  badgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
+
   timeTextLeft: { color: '#FFF', fontSize: 13, fontWeight: 'bold', minWidth: 40, textAlign: 'center' }, timeTextRight: { color: '#FFF', fontSize: 13, fontWeight: 'bold', minWidth: 40, textAlign: 'center' },
   sliderWrapper: { flex: 1, marginHorizontal: 8, justifyContent: 'center', position: 'relative', height: 40 }, customTrackContainer: { position: 'absolute', left: Platform.OS === 'android' ? 15 : 0, right: Platform.OS === 'android' ? 15 : 0, height: 3, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 2, overflow: 'hidden' }, bufferedBar: { height: '100%', backgroundColor: 'rgba(144, 238, 144, 0.8)', borderRadius: 2 }, miniTouchableArea: { flex: 1, width: '100%', height: '100%', position: 'absolute', zIndex: 50 }, miniControlsRow: { position: 'absolute', top: 5, right: 5, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 15, paddingHorizontal: 5, paddingVertical: 2, alignItems: 'center' }, miniCtrlBtn: { padding: 5, marginHorizontal: 3 }
 });
