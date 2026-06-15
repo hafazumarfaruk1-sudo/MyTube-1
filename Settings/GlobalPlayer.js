@@ -105,10 +105,21 @@ export default function GlobalPlayer() {
   
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  
+  // 🚨 [NEW] AI Menus and States
+  const [showAiMenu, setShowAiMenu] = useState(false);
+  const [showAiTimeMenu, setShowAiTimeMenu] = useState(false);
+  const [showAiBlurMenu, setShowAiBlurMenu] = useState(false);
+
   const [currentSpeed, setCurrentSpeed] = useState(1.0);
   
-  const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const [scanInterval, setScanInterval] = useState(3.0);
+  const [blurTarget, setBlurTarget] = useState('w'); // 'w' for Woman, 'm' for Man
 
+  const scanIntervalRef = useRef(3.0);
+  const blurTargetRef = useRef('w');
+
+  const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const isAudioModeRef = useRef(false);
   const streamModeRef = useRef('combined');
   const cachedAudioUrlRef = useRef(null); 
@@ -122,9 +133,28 @@ export default function GlobalPlayer() {
   const isAiProcessingRef = useRef(false); 
   const genderModelRef = useRef(null);
 
-  // 🚨 [Continuous Blur Logic States]
   const [isBlurredUI, setIsBlurredUI] = useState(false);
   const isBlurredRef = useRef(false);
+
+  // 🚨 Load Saved Settings
+  useEffect(() => {
+      const loadAiSettings = async () => {
+          try {
+              const savedInterval = await AsyncStorage.getItem('ai_interval');
+              if (savedInterval) {
+                  const val = parseFloat(savedInterval);
+                  setScanInterval(val);
+                  scanIntervalRef.current = val;
+              }
+              const savedTarget = await AsyncStorage.getItem('ai_blur_target');
+              if (savedTarget) {
+                  setBlurTarget(savedTarget);
+                  blurTargetRef.current = savedTarget;
+              }
+          } catch(e){}
+      };
+      loadAiSettings();
+  }, []);
 
   useEffect(() => {
     const setupAudio = async () => {
@@ -135,7 +165,7 @@ export default function GlobalPlayer() {
           shouldDuckAndroid: true,
           playThroughEarpieceAndroid: false,
         });
-      } catch (e) { console.log("Audio Setup Error:", e); }
+      } catch (e) {}
     };
     setupAudio();
   }, []);
@@ -159,7 +189,7 @@ export default function GlobalPlayer() {
   const triggerControls = () => {
     setShowControls(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-    controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 3000);
+    controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 4000);
   };
 
   useEffect(() => {
@@ -245,7 +275,7 @@ export default function GlobalPlayer() {
             scale.setValue(1); 
             baseScaleRef.current = 1;
         }
-    } catch (error) { console.log(error); }
+    } catch (error) {}
   };
 
   const seekTo = async (newTime) => {
@@ -259,7 +289,7 @@ export default function GlobalPlayer() {
                   safeSeek(syncAudioRef.current, newTime); 
               }
           }
-      } catch (error) { console.log("Seek Error: ", error); }
+      } catch (error) { }
   };
 
   useEffect(() => {
@@ -502,7 +532,7 @@ export default function GlobalPlayer() {
 
           console.log("⏸️ Video started! Giving player 2s to buffer...");
           await new Promise(r => setTimeout(r, 2000));
-          console.log("🚀 Storyboard & AI Engine Started...");
+          console.log(`🚀 AI Engine Started... Scan Interval: ${scanIntervalRef.current}s`);
 
           while (isQueueActive) {
               if (!lowStreamUrl || !videoSource) {
@@ -510,25 +540,26 @@ export default function GlobalPlayer() {
                   continue;
               }
 
-              let targetSec = targetScanSecRef.current;
+              // 🚨 User Selected Interval অনুযায়ী ফ্রেম কাটবে
+              let targetSec = parseFloat(targetScanSecRef.current.toFixed(1)); 
               const vDuration = player ? player.duration : 0;
 
               if (vDuration > 0 && targetSec > vDuration) {
-                  if (!isAiProcessingRef.current && targetSec === Math.floor(vDuration) + 3) {
+                  if (!isAiProcessingRef.current && targetSec >= Math.floor(vDuration)) {
                       let finalLog = `\n🎉 --- 📊 FINAL AI DATA MAP (FULL VIDEO) --- 🎉\n`;
                       Object.keys(aiDataMapRef.current).map(Number).sort((a,b) => a - b).forEach(timeKey => {
                           const entry = aiDataMapRef.current[timeKey];
                           finalLog += `${timeKey}s : [${entry.gender}] - Size: ${entry.size} KB\n`;
                       });
                       console.log(finalLog);
-                      targetScanSecRef.current += 3;
+                      targetScanSecRef.current += scanIntervalRef.current;
                   }
                   await new Promise(r => setTimeout(r, 5000));
                   continue;
               }
 
               if (aiDataMapRef.current[targetSec] !== undefined) {
-                  targetScanSecRef.current += 3;
+                  targetScanSecRef.current = parseFloat((targetSec + scanIntervalRef.current).toFixed(1));
                   continue;
               }
 
@@ -558,7 +589,9 @@ export default function GlobalPlayer() {
                       console.log(`✅ Scanned [${targetSec}s] -> Result: [${result}] | Size: ${sizeKB} KB`);
                       
                       await FileSystem.deleteAsync(tempLocalPath, { idempotent: true });
-                      targetScanSecRef.current += 3;
+                      
+                      // 🚨 Update with selected interval
+                      targetScanSecRef.current = parseFloat((targetSec + scanIntervalRef.current).toFixed(1));
                   }
               } catch(e) {
                   // Ignore
@@ -607,15 +640,7 @@ export default function GlobalPlayer() {
       }
   };
 
-  const changeSpeed = async (speed) => {
-      setCurrentSpeed(speed);
-      safeSetRate(player, speed); 
-      safeSetRate(syncAudioRef.current, speed); 
-      setShowSpeedMenu(false);
-      setShowSettingsMenu(false);
-  };
-
-  // 🚨 [Continuous Censor Logic Interval]
+  // 🚨 [Continuous Censor Logic Interval] - 200ms for High Accuracy
   useEffect(() => {
     const interval = setInterval(async () => {
         if (isSyncingRef.current) return; 
@@ -646,11 +671,18 @@ export default function GlobalPlayer() {
                     setCurrentTime(player.currentTime);
                     if (player.duration > 0) setDuration(player.duration);
 
-                    // 🚨 [MAGIC CENSOR LOGIC]: একটানা সেন্সর চেক করা
-                    const currentBlock = Math.floor(player.currentTime / 3) * 3;
-                    const blockData = aiDataMapRef.current[currentBlock];
+                    // 🚨 [MAGIC CENSOR LOGIC: Adapts to ANY Scan Time]
+                    let activeKey = 0;
+                    const keys = Object.keys(aiDataMapRef.current).map(Number).sort((a,b) => a - b);
+                    for (let i = 0; i < keys.length; i++) {
+                        if (keys[i] <= player.currentTime) activeKey = keys[i];
+                        else break;
+                    }
                     
-                    const needBlur = blockData && (blockData.gender === 'w' || blockData.gender === 'b');
+                    const blockData = aiDataMapRef.current[activeKey];
+                    // 🚨 Blur according to User Setting (w or m)
+                    const target = blurTargetRef.current;
+                    const needBlur = blockData && (blockData.gender === target || blockData.gender === 'b');
 
                     if (needBlur !== isBlurredRef.current) {
                         isBlurredRef.current = needBlur;
@@ -678,7 +710,7 @@ export default function GlobalPlayer() {
                 isSyncingRef.current = false;
             }
         }
-    }, 1000); 
+    }, 200); // 🚨 Update faster for 0.1s accuracy
     return () => clearInterval(interval);
   }, [player, streamMode, isAudioMode, videoSource]);
 
@@ -781,6 +813,10 @@ export default function GlobalPlayer() {
   const isInteractiveFull = playerState === 'full' || playerState === 'center' || playerState === 'fullscreen';
 
   const bufferedWidth = duration > 0 ? `${(buffered / duration) * 100}%` : '0%';
+  
+  // 🚨 AI Menus Config
+  const timeOptions = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.5, 2.0, 2.5, 3.0];
+  const blurOptions = [{label: 'Man', value: 'm'}, {label: 'Woman', value: 'w'}];
 
   return (
     <Animated.View 
@@ -810,10 +846,9 @@ export default function GlobalPlayer() {
                             nativeControls={false} 
                         />
                         
-                        {/* 🚨 [NEW] IMAGE OVERLAY CENSOR (Native UI) */}
+                        {/* 🚨 [IMAGE OVERLAY CENSOR] */}
                         {isBlurredUI && (
                             <View style={[StyleSheet.absoluteFillObject, { zIndex: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }]}>
-                                {/* ভিডিওর থাম্বনেইলকেই ঘোলা করে ব্যাকগ্রাউন্ডে দেওয়া হয়েছে */}
                                 <Image 
                                     source={{ uri: `https://img.youtube.com/vi/${currentVideoIdRef.current}/hqdefault.jpg` }}
                                     style={[StyleSheet.absoluteFillObject, { opacity: 0.5 }]}
@@ -822,7 +857,7 @@ export default function GlobalPlayer() {
                                 />
                                 <Ionicons name="eye-off-outline" size={60} color="rgba(255,255,255,0.8)" />
                                 <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 16, marginTop: 10, fontWeight: 'bold' }}>
-                                    AI Censored (Female Detected)
+                                    AI Censored ({blurTarget === 'w' ? 'Female' : 'Male'} Detected)
                                 </Text>
                             </View>
                         )}
@@ -960,11 +995,18 @@ export default function GlobalPlayer() {
           </View>
         )}
 
+        {/* 🚨 MAIN SETTINGS MODAL */}
         <Modal visible={showSettingsMenu} transparent animationType="fade">
             <TouchableOpacity style={styles.modalBackdrop} onPress={() => setShowSettingsMenu(false)}>
                 <TouchableOpacity activeOpacity={1} style={styles.settingsMenu}>
                     <Text style={styles.modalTitle}>Player Settings</Text>
                     
+                    {/* 🚨 [NEW] System AI Setting Button */}
+                    <TouchableOpacity style={styles.menuItem} onPress={() => { setShowSettingsMenu(false); setShowAiMenu(true); }}>
+                        <Ionicons name="hardware-chip-outline" size={20} color="#00FF00" style={styles.menuIcon} />
+                        <Text style={[styles.menuText, { color: '#00FF00' }]}>System AI Setting</Text>
+                    </TouchableOpacity>
+
                     <TouchableOpacity style={styles.menuItem} onPress={() => {
                         setShowSettingsMenu(false);
                         const ytUrl = `https://www.youtube.com/watch?v=${currentVideoIdRef.current}?app=desktop`; 
@@ -980,46 +1022,74 @@ export default function GlobalPlayer() {
                         <Ionicons name="speedometer-outline" size={20} color="#FFF" style={styles.menuIcon} />
                         <Text style={styles.menuText}>Playback Speed ({currentSpeed}x)</Text>
                     </TouchableOpacity>
+                </TouchableOpacity>
+            </TouchableOpacity>
+        </Modal>
 
-                    <TouchableOpacity style={styles.menuItem} onPress={async () => {
-                        setShowSettingsMenu(false);
-                        if (!videoData || !currentVideoIdRef.current) return;
-                        try {
-                            const existing = await AsyncStorage.getItem('saved_playlist');
-                            let playlist = existing ? JSON.parse(existing) : [];
-                            const isSaved = playlist.find(v => v.id === currentVideoIdRef.current);
-                            if (!isSaved) {
-                                playlist.unshift({
-                                    id: currentVideoIdRef.current,
-                                    title: videoData.title || "Video",
-                                    channel: videoData.channel || "Channel",
-                                    thumbnail: `https://i.ytimg.com/vi/${currentVideoIdRef.current}/hqdefault.jpg`,
-                                    views: videoData.views || ""
-                                });
-                                await AsyncStorage.setItem('saved_playlist', JSON.stringify(playlist));
-                                alert("ভিডিওটি প্লেলিস্টে সেভ হয়েছে!");
-                            } else {
-                                alert("ভিডিওটি আগে থেকেই প্লেলিস্টে আছে!");
-                            }
-                        } catch(e) {
-                            alert("সেভ করতে সমস্যা হয়েছে।");
-                        }
-                    }}>
-                        <Ionicons name="add-circle-outline" size={20} color="#FFF" style={styles.menuIcon} />
-                        <Text style={styles.menuText}>Save to Playlist</Text>
+        {/* 🚨 SYSTEM AI SETTING MODAL */}
+        <Modal visible={showAiMenu} transparent animationType="fade">
+            <TouchableOpacity style={styles.modalBackdrop} onPress={() => setShowAiMenu(false)}>
+                <TouchableOpacity activeOpacity={1} style={styles.settingsMenu}>
+                    <Text style={styles.modalTitle}>System AI Setting</Text>
+                    
+                    <TouchableOpacity style={styles.menuItem} onPress={() => { setShowAiMenu(false); setShowAiTimeMenu(true); }}>
+                        <Ionicons name="timer-outline" size={20} color="#FFF" style={styles.menuIcon} />
+                        <Text style={styles.menuText}>AI Scanning Time ({scanInterval}s)</Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity style={styles.menuItem} onPress={() => {
-                        setShowSettingsMenu(false);
-                        Share.share({ message: `Watch this awesome video: https://www.youtube.com/watch?v=${currentVideoIdRef.current}` });
-                    }}>
-                        <Ionicons name="share-social-outline" size={20} color="#FFF" style={styles.menuIcon} />
-                        <Text style={styles.menuText}>Share</Text>
+                    <TouchableOpacity style={styles.menuItem} onPress={() => { setShowAiMenu(false); setShowAiBlurMenu(true); }}>
+                        <Ionicons name="eye-off-outline" size={20} color="#FFF" style={styles.menuIcon} />
+                        <Text style={styles.menuText}>Video Blur System ({blurTarget === 'w' ? 'Woman' : 'Man'})</Text>
                     </TouchableOpacity>
                 </TouchableOpacity>
             </TouchableOpacity>
         </Modal>
 
+        {/* 🚨 AI SCANNING TIME MODAL */}
+        <Modal visible={showAiTimeMenu} transparent animationType="fade">
+            <TouchableOpacity style={styles.modalBackdrop} onPress={() => setShowAiTimeMenu(false)}>
+                <TouchableOpacity activeOpacity={1} style={[styles.settingsMenu, { maxHeight: 400 }]}>
+                    <Text style={styles.modalTitle}>AI Scanning Time</Text>
+                    <ScrollView showsVerticalScrollIndicator={false}>
+                        {timeOptions.map(t => (
+                            <TouchableOpacity key={t} style={styles.menuItem} onPress={async () => {
+                                setScanInterval(t);
+                                scanIntervalRef.current = t;
+                                await AsyncStorage.setItem('ai_interval', t.toString());
+                                setShowAiTimeMenu(false);
+                            }}>
+                                <Text style={[styles.menuText, scanInterval === t && {color: '#FF0000', fontWeight: 'bold'}]}>
+                                    {t} Seconds
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                </TouchableOpacity>
+            </TouchableOpacity>
+        </Modal>
+
+        {/* 🚨 VIDEO BLUR SYSTEM MODAL */}
+        <Modal visible={showAiBlurMenu} transparent animationType="fade">
+            <TouchableOpacity style={styles.modalBackdrop} onPress={() => setShowAiBlurMenu(false)}>
+                <TouchableOpacity activeOpacity={1} style={styles.settingsMenu}>
+                    <Text style={styles.modalTitle}>Target for Blur</Text>
+                    {blurOptions.map(opt => (
+                        <TouchableOpacity key={opt.value} style={styles.menuItem} onPress={async () => {
+                            setBlurTarget(opt.value);
+                            blurTargetRef.current = opt.value;
+                            await AsyncStorage.setItem('ai_blur_target', opt.value);
+                            setShowAiBlurMenu(false);
+                        }}>
+                            <Text style={[styles.menuText, blurTarget === opt.value && {color: '#FF0000', fontWeight: 'bold'}]}>
+                                Blur {opt.label}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </TouchableOpacity>
+            </TouchableOpacity>
+        </Modal>
+
+        {/* 🚨 SPEED MODAL */}
         <Modal visible={showSpeedMenu} transparent animationType="fade">
             <TouchableOpacity style={styles.modalBackdrop} onPress={() => setShowSpeedMenu(false)}>
                 <TouchableOpacity activeOpacity={1} style={styles.settingsMenu}>
