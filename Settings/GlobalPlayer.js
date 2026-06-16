@@ -194,7 +194,8 @@ export default function GlobalPlayer() {
   useEffect(() => {
     const appStateSub = AppState.addEventListener('change', async (nextAppState) => {
         if (nextAppState.match(/inactive|background/)) {
-            // PiP মোড যেন অ্যাপের বাইরে চলতে পারে তাই পজ লজিক রিমুভ করা হয়েছে
+            // 🚨 PiP (Picture-in-Picture) মোড যেন অ্যাপের বাইরে চলতে পারে, 
+            // তাই অ্যাপ ব্যাকগ্রাউন্ডে গেলে ভিডিও পজ করার লজিক মুছে দেওয়া হয়েছে।
         }
     });
     return () => appStateSub.remove();
@@ -272,6 +273,7 @@ export default function GlobalPlayer() {
     } catch (error) {}
   };
 
+  // 🚨 সার্ভারের পাইপকে ট্রিগার করার জন্য ফাংশন
   const startAiPipe = async (time) => {
       if (!lowStreamUrlRef.current) return;
       try {
@@ -978,10 +980,10 @@ export default function GlobalPlayer() {
 
                     <Text style={styles.timeTextRight}>{formatTime(duration)}</Text>
                     
-                    {/* 🚨 [FIXED] Picture-in-Picture (PiP) বাটন */}
+                    {/* 🚨 [NEW] Picture-in-Picture (PiP) বাটন যোগ করা হয়েছে */}
                     <TouchableOpacity style={{marginLeft: 12}} onPress={() => {
                         if (videoViewRef.current) {
-                            videoViewRef.current.startPictureInPicture(); 
+                            videoViewRef.current.enterPictureInPicture();
                         }
                     }}>
                         <MaterialIcons name="picture-in-picture-alt" size={22} color="#FFF" />
