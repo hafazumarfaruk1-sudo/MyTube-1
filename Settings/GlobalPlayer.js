@@ -10,6 +10,9 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import * as WebBrowser from 'expo-web-browser'; 
 import AsyncStorage from '@react-native-async-storage/async-storage'; 
 
+// 🚨 [TRACK PLAYER FOR BACKGROUND AUDIO]
+import TrackPlayer, { Capability } from 'react-native-track-player';
+
 // 🚨 [REAL AI INTEGRATION PACKAGES]
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy'; 
@@ -136,6 +139,22 @@ export default function GlobalPlayer() {
   const [isBlurredUI, setIsBlurredUI] = useState(false);
   const isBlurredRef = useRef(false);
 
+  // 🚨 TrackPlayer Initializer
+  useEffect(() => {
+      const setupTrackPlayer = async () => {
+          try {
+              await TrackPlayer.setupPlayer();
+              await TrackPlayer.updateOptions({
+                  stopWithApp: false,
+                  capabilities: [Capability.Play, Capability.Pause, Capability.Stop, Capability.SeekTo],
+                  compactCapabilities: [Capability.Play, Capability.Pause],
+                  notificationCapabilities: [Capability.Play, Capability.Pause, Capability.Stop],
+              });
+          } catch(e) {}
+      };
+      setupTrackPlayer();
+  }, []);
+
   useEffect(() => {
       const loadAiSettings = async () => {
           try {
@@ -194,8 +213,7 @@ export default function GlobalPlayer() {
   useEffect(() => {
     const appStateSub = AppState.addEventListener('change', async (nextAppState) => {
         if (nextAppState.match(/inactive|background/)) {
-            // 🚨 PiP (Picture-in-Picture) মোড যেন অ্যাপের বাইরে চলতে পারে, 
-            // তাই অ্যাপ ব্যাকগ্রাউন্ডে গেলে ভিডিও পজ করার লজিক মুছে দেওয়া হয়েছে।
+            // PiP মোডের জন্য কোনো Pause লজিক নেই
         }
     });
     return () => appStateSub.remove();
@@ -273,7 +291,6 @@ export default function GlobalPlayer() {
     } catch (error) {}
   };
 
-  // 🚨 সার্ভারের পাইপকে ট্রিগার করার জন্য ফাংশন
   const startAiPipe = async (time) => {
       if (!lowStreamUrlRef.current) return;
       try {
@@ -288,7 +305,7 @@ export default function GlobalPlayer() {
 
       try {
           if (isAudioModeRef.current) {
-              safeSeek(syncAudioRef.current, newTime); 
+              await TrackPlayer.seekTo(newTime); 
           } else {
               safeSeek(player, newTime); 
               if (streamModeRef.current === 'separate' && syncAudioRef.current) {
@@ -338,11 +355,13 @@ export default function GlobalPlayer() {
       triggerControls();
 
       safeReleaseAudio();
+      try { await TrackPlayer.reset(); } catch(e){}
 
       const targetQuality = global.appSettings?.normalVideo || '720p';
       fetchStreamUrl(data.videoId, targetQuality, fetchIdRef.current);
     });
 
+    // 🚨 AUDIO MODE TRACK PLAYER SETUP
     const audioModeSub = DeviceEventEmitter.addListener('toggleAudioMode', async (mode) => {
       setIsAudioMode(mode);
       isAudioModeRef.current = mode;
@@ -353,39 +372,39 @@ export default function GlobalPlayer() {
           setVideoSource(null); 
           setIsPlayingUI(true); 
 
-          if (streamModeRef.current === 'separate' && syncAudioRef.current) {
-              if (!syncAudioRef.current.playing) syncAudioRef.current.play();
-          } else {
-              let audioUrlToPlay = cachedAudioUrlRef.current;
-              if (!audioUrlToPlay) {
-                  try {
-                      const res = await fetch(`${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&action=play&type=audio`);
-                      const json = await res.json();
-                      if (json.success && (json.audioUrl || json.url)) {
-                          audioUrlToPlay = json.audioUrl || json.url;
-                          cachedAudioUrlRef.current = audioUrlToPlay; 
-                      }
-                  } catch (e) {}
-              }
-              if (audioUrlToPlay) {
-                  safeReleaseAudio();
-                  syncAudioRef.current = createAudioPlayer(audioUrlToPlay);
-                  pendingSeekRef.current = resumeTimeRef.current; 
-                  safeSetRate(syncAudioRef.current, currentSpeed); 
-                  syncAudioRef.current.play();
-              }
+          let audioUrlToPlay = cachedAudioUrlRef.current;
+          if (!audioUrlToPlay) {
+              try {
+                  const res = await fetch(`${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&action=play&type=audio`);
+                  const json = await res.json();
+                  if (json.success && (json.audioUrl || json.url)) {
+                      audioUrlToPlay = json.audioUrl || json.url;
+                      cachedAudioUrlRef.current = audioUrlToPlay; 
+                  }
+              } catch (e) {}
+          }
+          if (audioUrlToPlay) {
+              try {
+                  await TrackPlayer.reset();
+                  await TrackPlayer.add({
+                      id: currentVideoIdRef.current || 'track',
+                      url: audioUrlToPlay,
+                      title: videoData?.title || 'Playing Audio',
+                      artist: videoData?.channel || 'MyTube',
+                      artwork: `https://i.ytimg.com/vi/${currentVideoIdRef.current}/hqdefault.jpg`,
+                  });
+                  await TrackPlayer.seekTo(resumeTimeRef.current);
+                  await TrackPlayer.setRate(currentSpeed);
+                  await TrackPlayer.play();
+              } catch(e){}
           }
       } else {
           let resumeVideoTime = resumeTimeRef.current;
-
-          if (syncAudioRef.current) {
-              resumeVideoTime = syncAudioRef.current.currentTime;
-              if (streamModeRef.current !== 'separate') {
-                  safeReleaseAudio();
-              } else {
-                  syncAudioRef.current.pause();
-              }
-          }
+          try {
+              const progress = await TrackPlayer.getProgress();
+              resumeVideoTime = progress.position || resumeVideoTime;
+              await TrackPlayer.pause();
+          } catch(e){}
 
           resumeTimeRef.current = resumeVideoTime;
           setVideoSource(streamUrl); 
@@ -538,8 +557,6 @@ export default function GlobalPlayer() {
 
           if (!isQueueActive) return;
 
-          console.log(`🚀 Zero-Data Pipe Engine Started... Scan Interval: ${scanIntervalRef.current}s`);
-
           while (isQueueActive) {
               if (!lowStreamUrlRef.current || !videoSource) {
                   await new Promise(r => setTimeout(r, 1000));
@@ -576,8 +593,6 @@ export default function GlobalPlayer() {
                           return updated.sort((a, b) => a.time - b.time);
                       });
 
-                      console.log(`✅ Scanned [${targetSec}s] -> Result: [${result}]`);
-                      
                       await FileSystem.deleteAsync(tempLocalPath, { idempotent: true });
                       targetScanSecRef.current = parseFloat((targetSec + scanIntervalRef.current).toFixed(1));
                   } else if (data.status === 'processing') {
@@ -634,11 +649,13 @@ export default function GlobalPlayer() {
   const changeSpeed = async (speed) => {
       setCurrentSpeed(speed);
       safeSetRate(player, speed); 
+      try { await TrackPlayer.setRate(speed); } catch(e){}
       safeSetRate(syncAudioRef.current, speed); 
       setShowSpeedMenu(false);
       setShowSettingsMenu(false);
   };
 
+  // 🚨 UI Loop Updater for Both Video and TrackPlayer
   useEffect(() => {
     const interval = setInterval(async () => {
         if (isSyncingRef.current) return; 
@@ -646,18 +663,15 @@ export default function GlobalPlayer() {
         if (isAudioMode) {
             isSyncingRef.current = true;
             try {
-                const isAudioReady = syncAudioRef.current && (syncAudioRef.current.duration > 0 || syncAudioRef.current.playing);
-                if (isAudioReady) {
-                    setIsPlayingUI(syncAudioRef.current.playing);
+                const progress = await TrackPlayer.getProgress();
+                const stateObj = await TrackPlayer.getPlaybackState();
+                const stateStr = typeof stateObj === 'object' ? stateObj.state : stateObj;
+                
+                setIsPlayingUI(stateStr === 'playing');
 
-                    if (pendingSeekRef.current !== null) {
-                        safeSeek(syncAudioRef.current, pendingSeekRef.current); 
-                        setCurrentTime(pendingSeekRef.current);
-                        pendingSeekRef.current = null;
-                    } else if (!isSlidingRef.current) {
-                        setCurrentTime(syncAudioRef.current.currentTime);
-                        if (syncAudioRef.current.duration > 0) setDuration(syncAudioRef.current.duration);
-                    }
+                if (!isSlidingRef.current) {
+                    setCurrentTime(progress.position);
+                    if (progress.duration > 0) setDuration(progress.duration);
                 }
             } catch(e) {}
             isSyncingRef.current = false;
@@ -797,6 +811,7 @@ export default function GlobalPlayer() {
       setVideoSource(null); 
       if (player) player.pause();
       safeReleaseAudio();
+      try { await TrackPlayer.reset(); } catch(e){}
   };
 
   const formatTime = (timeInSeconds) => {
@@ -833,7 +848,6 @@ export default function GlobalPlayer() {
             <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
                 {videoSource ? (
                     <View style={{ flex: 1, width: '100%', height: '100%' }}>
-                        {/* 🚨 allowsPictureInPicture={true} পারমিশন যোগ করা হয়েছে */}
                         <VideoView 
                             key={videoSource} 
                             ref={videoViewRef} 
@@ -874,7 +888,7 @@ export default function GlobalPlayer() {
                         ব্যাকগ্রাউন্ড অডিও মোড চলছে
                     </Text>
                     <Text style={{ color: '#DDD', marginTop: 5, fontSize: 12 }}>
-                        ভিডিও পুরোপুরি বন্ধ আছে (ডাটা সাশ্রয়ী)
+                        লক-স্ক্রিন ও নোটিফিকেশন বার থেকে কন্ট্রোল করুন
                     </Text>
                 </View>
             )}
@@ -895,10 +909,12 @@ export default function GlobalPlayer() {
              <View style={styles.centerRow} pointerEvents="box-none">
                 <TouchableOpacity onPress={async () => {
                     if (isAudioMode) {
-                        if (syncAudioRef.current) {
-                            if (syncAudioRef.current.playing) syncAudioRef.current.pause();
-                            else syncAudioRef.current.play();
-                        }
+                        try {
+                            const stateObj = await TrackPlayer.getPlaybackState();
+                            const stateStr = typeof stateObj === 'object' ? stateObj.state : stateObj;
+                            if (stateStr === 'playing') await TrackPlayer.pause();
+                            else await TrackPlayer.play();
+                        } catch(e) {}
                     } else if (player) {
                         if (player.playing) {
                             player.pause();
@@ -980,10 +996,13 @@ export default function GlobalPlayer() {
 
                     <Text style={styles.timeTextRight}>{formatTime(duration)}</Text>
                     
-                    {/* 🚨 [NEW] Picture-in-Picture (PiP) বাটন যোগ করা হয়েছে */}
-                    <TouchableOpacity style={{marginLeft: 12}} onPress={() => {
+                    <TouchableOpacity style={{marginLeft: 12}} onPress={async () => {
                         if (videoViewRef.current) {
-                            videoViewRef.current.enterPictureInPicture();
+                            try {
+                                await videoViewRef.current.startPictureInPicture(); 
+                            } catch (e) {
+                                alert("PiP Mode not supported on this device/build.");
+                            }
                         }
                     }}>
                         <MaterialIcons name="picture-in-picture-alt" size={22} color="#FFF" />
@@ -1127,10 +1146,12 @@ export default function GlobalPlayer() {
                 <View style={styles.miniControlsRow}>
                     <TouchableOpacity style={styles.miniCtrlBtn} onPress={async () => {
                         if (isAudioMode) {
-                            if (syncAudioRef.current) {
-                                if (syncAudioRef.current.playing) syncAudioRef.current.pause();
-                                else syncAudioRef.current.play();
-                            }
+                            try {
+                                const stateObj = await TrackPlayer.getPlaybackState();
+                                const stateStr = typeof stateObj === 'object' ? stateObj.state : stateObj;
+                                if (stateStr === 'playing') await TrackPlayer.pause();
+                                else await TrackPlayer.play();
+                            } catch(e) {}
                         } else if (player) {
                             if (player.playing) {
                                 player.pause();
