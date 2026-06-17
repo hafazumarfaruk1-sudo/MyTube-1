@@ -25,7 +25,7 @@ import livescreen from './Screens/livescreen';
 // ==========================================
 import SettingsScreen from './Settings/SettingsScreen';
 import HistoryPage from './Settings/HistoryPage';
-import downloadscreen from './Settings/downloadscreen'; // 🚨 এরর এড়াতে এটি আনকমেন্ট করা হলো
+import GlobalDownloadManager from './Settings/GlobalDownloadManager'; // 🚨 এরর এড়াতে এটি আনকমেন্ট করা হলো
 import SearchSetting from './Settings/searchsetting';
 import GlobalPlayer from './Settings/GlobalPlayer'; 
 
