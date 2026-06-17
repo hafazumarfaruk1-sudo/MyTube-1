@@ -3,6 +3,9 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 
+// 🎵 [NEW] TrackPlayer ইমপোর্ট করা হলো
+import TrackPlayer from 'react-native-track-player';
+
 import { ThemeProvider } from './ThemeContext';
 import { LanguageProvider } from './LanguageContext';
 
@@ -15,19 +18,24 @@ import PlayerScreen from './Screens/PlayerScreen';
 import PlaylistPage from './Screens/PlaylistPage';
 import ShortsScreen from './Screens/ShortsScreen';
 import SubscriptionsScreen from './Screens/SubscriptionsScreen';
-import livescreen from './Screens/livescreen'; // আপনার কমিট অনুযায়ী হুবহু রাখা হলো
+import livescreen from './Screens/livescreen'; 
 
 // ==========================================
 // ২. Settings ফোল্ডার থেকে ফাইল ইমপোর্ট
 // ==========================================
 import SettingsScreen from './Settings/SettingsScreen';
 import HistoryPage from './Settings/HistoryPage';
-//import downloadscreen from './Settings/downloadscreen'; // আপনার কমিট অনুযায়ী হুবহু রাখা হলো
+import downloadscreen from './Settings/downloadscreen'; // 🚨 এরর এড়াতে এটি আনকমেন্ট করা হলো
 import SearchSetting from './Settings/searchsetting';
-import GlobalPlayer from './Settings/GlobalPlayer'; // ফ্লোটিং প্লেয়ার ইমপোর্ট
+import GlobalPlayer from './Settings/GlobalPlayer'; 
 
 // 🎯 নতুন গ্লোবাল ডাউনলোড ম্যানেজার ইমপোর্ট
-import GlobalDownloadManager from './Settings/GlobalDownloadManager'; 
+import GlobalDownloadManager from './Settings/GlobalDownloadManager';
+
+// 🚀 [NEW] অ্যাপ চালুর আগেই ব্যাকগ্রাউন্ড অডিও সার্ভিসটি রেজিস্টার করা হলো
+// এটি অ্যাপ কেটে দিলেও নোটিফিকেশনে অডিও বাটনগুলো বাঁচিয়ে রাখবে!
+TrackPlayer.registerPlaybackService(() => require('./service'));
+
 
 const Stack = createStackNavigator();
 
