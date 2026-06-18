@@ -21,7 +21,6 @@ export default function SearchSettingScreen({ route }) {
   const [query, setQuery] = useState('');
   const [history, setHistory] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
-
   const [showResults, setShowResults] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -30,8 +29,9 @@ export default function SearchSettingScreen({ route }) {
   const [continuationToken, setContinuationToken] = useState(null);
   const [apiKey, setApiKey] = useState(null);
 
-  const [videoScanSettings, setVideoScanSettings] = useState({}); 
+  // 🚨 Master Controls
   const [masterVideoScan, setMasterVideoScan] = useState(global.appSettings?.aiVideoScan !== 'false');
+  const [videoScanSettings, setVideoScanSettings] = useState({}); 
   const [masterThumbQuality, setMasterThumbQuality] = useState(global.appSettings?.thumbnailQuality || 'High');
 
   useEffect(() => {
@@ -39,6 +39,8 @@ export default function SearchSettingScreen({ route }) {
       try {
         const savedHistory = await AsyncStorage.getItem('myTubeSearchHistory');
         if (savedHistory) setHistory(JSON.parse(savedHistory));
+        const aiScan = await AsyncStorage.getItem('ai_video_scan_master');
+        if (aiScan) setMasterVideoScan(aiScan !== 'false');
       } catch (e) {}
     };
     loadData();
@@ -91,10 +93,8 @@ export default function SearchSettingScreen({ route }) {
   const handleSearchSubmit = async (searchTerm) => {
     const text = typeof searchTerm === 'string' ? searchTerm : query;
     if (text.trim().length === 0) return;
-
     inputRef.current?.blur();
     Keyboard.dismiss();
-
     saveHistory(text.trim());
     setQuery(text.trim());
     setSuggestions([]);
@@ -154,8 +154,7 @@ export default function SearchSettingScreen({ route }) {
             channelUrl: channelUrl
           };
           setIsSearching(false);
-          
-          const doScan = masterVideoScan ? (videoScanSettings[targetId] !== false) : false; 
+          const doScan = videoScanSettings[targetId] !== undefined ? videoScanSettings[targetId] : masterVideoScan; 
           navigation.replace('Player', { videoId: targetId, videoData: fullVideoData, aiScanEnabled: doScan });
           return;
         }
@@ -167,7 +166,6 @@ export default function SearchSettingScreen({ route }) {
   const fetchSearchResults = async (searchQuery) => {
     setIsSearching(true);
     setSearchResults([]);
-
     try {
       const response = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
       const htmlText = await response.text();
@@ -200,7 +198,6 @@ export default function SearchSettingScreen({ route }) {
       });
       const data = await response.json();
       const { finalFeed, nextToken } = processYouTubeData(data);
-
       setSearchResults(prev => [...prev, ...finalFeed]);
       setContinuationToken(nextToken);
     } catch (e) {} finally { setIsLoadingMore(false); }
@@ -236,7 +233,6 @@ export default function SearchSettingScreen({ route }) {
     extractNodes(jsonData);
 
     const finalFeed = [];
-
     extractedChannels.forEach(ch => {
       const avatarUrl = getDynamicThumbnail(ch.thumbnail, null) || 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg';
       finalFeed.push({
@@ -265,7 +261,6 @@ export default function SearchSettingScreen({ route }) {
       if (v.videoId && !uniqueVideosMap.has(v.videoId)) {
         const thumbUrl = getDynamicThumbnail(v.thumbnail, v.videoId);
         const avatarUrl = getDynamicThumbnail(v.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail, null);
-        
         uniqueVideosMap.set(v.videoId, {
           type: 'video', id: v.videoId, title: v.title?.runs?.[0]?.text,
           channel: v.ownerText?.runs?.[0]?.text, views: v.shortViewCountText?.simpleText,
@@ -281,15 +276,19 @@ export default function SearchSettingScreen({ route }) {
     return { finalFeed, nextToken };
   };
 
+  // 🚨 Local Scan Override Toggle
   const toggleVideoScan = (id) => {
-      setVideoScanSettings(prev => ({...prev, [id]: !prev[id]}));
+      setVideoScanSettings(prev => {
+          const currentState = prev[id] !== undefined ? prev[id] : masterVideoScan;
+          return { ...prev, [id]: !currentState };
+      });
   };
 
   const navigateToPlayer = (item) => {
     Keyboard.dismiss();
     inputRef.current?.blur();
     setTimeout(() => {
-        const doScan = masterVideoScan ? (videoScanSettings[item.id] !== false) : false;
+        const doScan = videoScanSettings[item.id] !== undefined ? videoScanSettings[item.id] : masterVideoScan;
         navigation.navigate('Player', { videoId: item.id, videoData: item, aiScanEnabled: doScan });
     }, 0);
   };
@@ -299,6 +298,14 @@ export default function SearchSettingScreen({ route }) {
     inputRef.current?.blur();
     setTimeout(() => {
         navigation.navigate('Shorts', { initialVideoId: short.id, videoId: short.id, videoData: short });
+    }, 0);
+  };
+
+  const navigateToChannel = (item) => {
+    Keyboard.dismiss();
+    inputRef.current?.blur();
+    setTimeout(() => {
+        navigation.navigate('Channel', { channelName: item.channel || item.title, channelAvatar: item.avatar, channelUrl: item.channelUrl });
     }, 0);
   };
 
@@ -314,22 +321,20 @@ export default function SearchSettingScreen({ route }) {
             horizontal showsHorizontalScrollIndicator={false} data={item.shorts} 
             keyExtractor={(short, index) => short.id + '_' + index.toString()} 
             renderItem={({item: short}) => (
-              <View style={styles.shortCardWrapper}>
-                  <TouchableOpacity style={styles.shortCard} activeOpacity={0.9} onPress={() => navigateToShorts(short)}>
-                    <Image source={{ uri: short.thumbnail }} style={styles.shortThumb} />
-                    <View style={styles.shortOverlay}>
-                      <Text style={styles.shortTitle} numberOfLines={2}>{short.title}</Text>
-                      <Text style={styles.shortViews}>{short.views}</Text>
-                    </View>
-                  </TouchableOpacity>
-              </View>
+              <TouchableOpacity style={styles.shortCard} activeOpacity={0.9} onPress={() => navigateToShorts(short)}>
+                <Image source={{ uri: short.thumbnail }} style={styles.shortThumb} />
+                <View style={styles.shortOverlay}>
+                  <Text style={styles.shortTitle} numberOfLines={2}>{short.title}</Text>
+                  <Text style={styles.shortViews}>{short.views}</Text>
+                </View>
+              </TouchableOpacity>
           )} />
         </View>
       );
     }
 
     if (item.type === 'video') {
-      const isScanOn = videoScanSettings[item.id] !== false; 
+      const isScanOn = videoScanSettings[item.id] !== undefined ? videoScanSettings[item.id] : masterVideoScan; 
       return (
         <View style={styles.videoCard}>
           <TouchableOpacity activeOpacity={0.9} onPress={() => navigateToPlayer(item)}>
@@ -337,23 +342,25 @@ export default function SearchSettingScreen({ route }) {
             {item.duration && <View style={styles.duration}><Text style={styles.durationText}>{item.duration}</Text></View>}
           </TouchableOpacity>
           <View style={styles.videoInfo}>
-            <Image source={{ uri: item.avatar }} style={styles.channelAvatar} />
+            <TouchableOpacity activeOpacity={0.8} onPress={() => navigateToChannel(item)}>
+              <Image source={{ uri: item.avatar }} style={styles.channelAvatar} />
+            </TouchableOpacity>
             <View style={styles.textContainer}>
               <Text style={styles.videoTitle} numberOfLines={2}>{item.title}</Text>
-              <Text style={styles.videoMeta}>{item.channel} • {item.views} • {item.publishedTime}</Text>
+              <TouchableOpacity activeOpacity={0.8} onPress={() => navigateToChannel(item)}>
+                <Text style={styles.videoMeta}>{item.channel} • {item.views} • {item.publishedTime}</Text>
+              </TouchableOpacity>
             </View>
             
-            {masterVideoScan && (
-                <TouchableOpacity 
-                    style={[styles.videoAiScanToggle, { borderColor: isScanOn ? '#00BFA5' : '#555' }]} 
-                    onPress={() => toggleVideoScan(item.id)}
-                >
-                    <Ionicons name="hardware-chip-outline" size={16} color={isScanOn ? '#00BFA5' : '#888'} />
-                    <Text style={{ fontSize: 10, color: isScanOn ? '#00BFA5' : '#888', marginTop: 2, fontWeight: 'bold' }}>
-                        {isScanOn ? 'SCAN ON' : 'SCAN OFF'}
-                    </Text>
-                </TouchableOpacity>
-            )}
+            <TouchableOpacity 
+                style={[styles.videoAiScanToggle, { borderColor: isScanOn ? '#00BFA5' : (isDarkMode ? '#444' : '#CCC') }]} 
+                onPress={() => toggleVideoScan(item.id)}
+            >
+                <Ionicons name="hardware-chip-outline" size={16} color={isScanOn ? '#00BFA5' : (isDarkMode ? '#888' : '#999')} />
+                <Text style={{ fontSize: 9, color: isScanOn ? '#00BFA5' : (isDarkMode ? '#888' : '#999'), marginTop: 2, fontWeight: 'bold' }}>
+                    {isScanOn ? 'SCAN ON' : 'SCAN OFF'}
+                </Text>
+            </TouchableOpacity>
           </View>
         </View>
       );
@@ -361,13 +368,13 @@ export default function SearchSettingScreen({ route }) {
 
     if (item.type === 'channel') {
       return (
-        <View style={styles.channelRow}>
+        <TouchableOpacity style={styles.channelRow} onPress={() => navigateToChannel(item)}>
           <Image source={{ uri: item.avatar }} style={styles.channelBigAvatar} />
           <View style={{ flex: 1, marginLeft: 15 }}>
             <Text style={styles.channelTitleMain}>{item.title}</Text>
             <Text style={styles.channelMetaMain}>{item.subscribers} • Channel</Text>
           </View>
-        </View>
+        </TouchableOpacity>
       );
     }
   };
@@ -391,8 +398,7 @@ export default function SearchSettingScreen({ route }) {
             ref={inputRef} style={styles.input} placeholder={__translate('Search...')} 
             placeholderTextColor={isDarkMode ? '#888' : '#666'} value={query} 
             onChangeText={handleTextChange} onSubmitEditing={() => handleSearchSubmit(query)} 
-            onTouchStart={() => { if (showResults) setShowResults(false); }}
-            autoCorrect={false} autoCapitalize="none"
+            onTouchStart={() => { if (showResults) setShowResults(false); }} autoCorrect={false} autoCapitalize="none"
           />
           {query.length > 0 && (
             <TouchableOpacity onPress={() => { setQuery(''); setShowResults(false); inputRef.current?.focus(); }}>
@@ -454,7 +460,7 @@ function getDynamicStyles(isDark) {
     deleteBtn: { padding: 5, paddingLeft: 15 },
     center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     videoCard: { marginBottom: 15 },
-    thumbnail: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000' },
+    thumbnail: { width: '100%', aspectRatio: 16 / 9, backgroundColor: isDark ? '#111' : '#ddd' },
     duration: { position: 'absolute', bottom: 8, right: 8, backgroundColor: isDark ? 'rgba(0,0,0,0.8)' : 'rgba(0,0,0,0.08)', padding: 4, borderRadius: 4 },
     durationText: { color: isDark ? '#FFF' : '#000', fontSize: 12 },
     videoInfo: { flexDirection: 'row', padding: 12, alignItems: 'center' },
@@ -462,12 +468,12 @@ function getDynamicStyles(isDark) {
     textContainer: { flex: 1 },
     videoTitle: { color: isDark ? '#FFF' : '#000', fontSize: 14, fontWeight: '500' },
     videoMeta: { color: isDark ? '#AAA' : '#666', fontSize: 12, marginTop: 4 },
-    videoAiScanToggle: { padding: 6, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center', width: 60, marginLeft: 10 },
+    // 🚨 Toggle Button Styles
+    videoAiScanToggle: { padding: 6, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center', width: 60, marginLeft: 'auto' },
     shortsShelf: { paddingVertical: 15, borderBottomWidth: 4, borderBottomColor: isDark ? '#222' : '#e6e6e6' },
     shelfHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, marginBottom: 12 },
     shelfTitle: { color: isDark ? '#FFF' : '#000', fontSize: 18, fontWeight: 'bold', marginLeft: 8 },
-    shortCardWrapper: { marginLeft: 12, marginRight: 4, alignItems: 'center' },
-    shortCard: { width: Dimensions.get('window').width * 0.4, height: Dimensions.get('window').width * 0.72, borderRadius: 12, overflow: 'hidden', backgroundColor: '#000' },
+    shortCard: { width: Dimensions.get('window').width * 0.4, height: Dimensions.get('window').width * 0.72, marginRight: 12, borderRadius: 12, overflow: 'hidden', marginLeft: 12, backgroundColor: isDark ? '#222' : '#fff' },
     shortThumb: { width: '100%', height: '100%' },
     shortOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 8, backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.08)' },
     shortTitle: { color: isDark ? '#FFF' : '#000', fontSize: 13, fontWeight: 'bold', marginBottom: 2 },
