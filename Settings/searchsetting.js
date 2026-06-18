@@ -7,15 +7,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../ThemeContext';
 import { useLanguage } from '../LanguageContext';
 
-// 🚨 [AI PACKAGES]
-import * as ImageManipulator from 'expo-image-manipulator';
-import * as FileSystem from 'expo-file-system/legacy';
-import { decode } from 'base64-arraybuffer';
-import * as jpeg from 'jpeg-js';
-import { Asset } from 'expo-asset';
-import FaceDetection from '@react-native-ml-kit/face-detection';
-import { loadTensorflowModel } from 'react-native-fast-tflite';
-
 const { width, height } = Dimensions.get('window');
 const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -39,17 +30,8 @@ export default function SearchSettingScreen({ route }) {
   const [continuationToken, setContinuationToken] = useState(null);
   const [apiKey, setApiKey] = useState(null);
 
-  // 🤖 [AI STATES & REFS]
-  const genderModelRef = useRef(null);
-  const scanQueueRef = useRef([]); 
-  const isQueueProcessingRef = useRef(false);
-  
-  const [thumbStates, setThumbStates] = useState({}); 
   const [videoScanSettings, setVideoScanSettings] = useState({}); 
-
-  // 🚨 [NEW] Master Controls
   const [masterVideoScan, setMasterVideoScan] = useState(global.appSettings?.aiVideoScan !== 'false');
-  const [masterThumbScan, setMasterThumbScan] = useState(global.appSettings?.aiThumbScan !== 'false');
   const [masterThumbQuality, setMasterThumbQuality] = useState(global.appSettings?.thumbnailQuality || 'High');
 
   useEffect(() => {
@@ -68,11 +50,10 @@ export default function SearchSettingScreen({ route }) {
       });
     }
 
-    // Listen to Quality Changes from Settings Screen
-    const qSub = DeviceEventEmitter.addListener('thumbQualityChanged', (val) => {
-        setMasterThumbQuality(val);
-    });
-    return () => { qSub.remove(); }
+    const qSub = DeviceEventEmitter.addListener('thumbQualityChanged', (val) => setMasterThumbQuality(val));
+    const scanSub = DeviceEventEmitter.addListener('aiVideoScanChanged', (val) => setMasterVideoScan(val !== 'false'));
+    
+    return () => { qSub.remove(); scanSub.remove(); }
   }, []);
 
   useEffect(() => {
@@ -82,115 +63,6 @@ export default function SearchSettingScreen({ route }) {
         handleSearchSubmit(searchUrl);
     }
   }, [route?.params?.initialSearch]);
-
-  const loadGenderModelAsync = async () => {
-    if (!genderModelRef.current) {
-        try {
-            const asset = Asset.fromModule(require('../assets/gender_classification.tflite'));
-            await asset.downloadAsync();
-            genderModelRef.current = await loadTensorflowModel({ url: asset.localUri || asset.uri }, []);
-        } catch (e) { }
-    }
-  };
-
-  const processImageForGender = async (uri) => {
-    try {
-        const faces = await FaceDetection.detect(uri);
-        if (faces && faces.length > 0) {
-            let hasFemale = false; let hasMale = false;
-
-            for (let i = 0; i < faces.length; i++) {
-                const face = faces[i];
-                const box = face.frame || face.bounds || {}; 
-                
-                let padding = 20; 
-                let faceWidth = box.width ?? 0;
-                let faceHeight = box.height ?? 0;
-
-                let originX = Math.floor(Math.max(0, (box.left ?? box.x ?? box.originX ?? 0) - padding));
-                let originY = Math.floor(Math.max(0, (box.top ?? box.y ?? box.originY ?? 0) - padding));
-                let cWidth = Math.floor(Math.max(10, faceWidth + padding * 2));
-                let cHeight = Math.floor(Math.max(10, faceHeight + padding * 2)); 
-                
-                const croppedFace = await ImageManipulator.manipulateAsync(
-                    uri, 
-                    [{ crop: { originX, originY, width: cWidth, height: cHeight } }, { resize: { width: 224, height: 224 } }], 
-                    { compress: 1, format: ImageManipulator.SaveFormat.JPEG }
-                );
-                
-                await loadGenderModelAsync();
-                const base64Data = await FileSystem.readAsStringAsync(croppedFace.uri, { encoding: FileSystem.EncodingType.Base64 });
-                const rawBuffer = new Uint8Array(decode(base64Data));
-                const rawImageData = jpeg.decode(rawBuffer, { useTArray: true });
-
-                const pureInputBuffer = new ArrayBuffer(224 * 224 * 3 * 4);
-                const inputData = new Float32Array(pureInputBuffer);
-
-                let rgbIndex = 0;
-                for (let j = 0; j < rawImageData.data.length; j += 4) {
-                    inputData[rgbIndex++] = rawImageData.data[j] / 255.0;     
-                    inputData[rgbIndex++] = rawImageData.data[j + 1] / 255.0; 
-                    inputData[rgbIndex++] = rawImageData.data[j + 2] / 255.0; 
-                }
-
-                const output = await genderModelRef.current.run([pureInputBuffer]);
-                let probability = output && output.length > 0 ? new Float32Array(output[0])[0] : 0;
-                
-                if (probability >= 0.50) { hasFemale = true; } 
-                else { hasMale = true; }
-            }
-            if (hasFemale && hasMale) return 'b'; 
-            if (hasFemale) return 'w';
-            if (hasMale) return 'm';
-        }
-        return 'none';
-    } catch (error) { return 'none'; }
-  };
-
-  useEffect(() => {
-    let isActive = true;
-    const processQueue = async () => {
-        if (isQueueProcessingRef.current || scanQueueRef.current.length === 0) return;
-        
-        // 🚨 [NEW] মাস্টার থাম্বনেইল স্ক্যান অফ থাকলে স্কিপ করবে
-        if (!masterThumbScan) {
-            while(scanQueueRef.current.length > 0) {
-                const item = scanQueueRef.current.shift();
-                setThumbStates(prev => ({...prev, [item.id]: 'clean'}));
-            }
-            return;
-        }
-
-        isQueueProcessingRef.current = true;
-
-        while(scanQueueRef.current.length > 0 && isActive) {
-            const item = scanQueueRef.current.shift(); 
-            setThumbStates(prev => ({...prev, [item.id]: 'scanning'}));
-
-            try {
-                const tempPath = `${FileSystem.cacheDirectory}thumb_search_${item.id}.jpg`;
-                await FileSystem.downloadAsync(item.url, tempPath);
-                
-                const result = await processImageForGender(tempPath);
-                await FileSystem.deleteAsync(tempPath, { idempotent: true });
-
-                // 🚨 [NEW] ইউজার সেটিংস থেকে টার্গেট আনা হচ্ছে
-                const target = global.appSettings?.aiBlurTarget || 'w';
-                const needBlur = (result === target || result === 'b');
-                
-                setThumbStates(prev => ({...prev, [item.id]: needBlur ? 'blur' : 'clean'}));
-
-            } catch (error) {
-                setThumbStates(prev => ({...prev, [item.id]: 'clean'})); 
-            }
-            await new Promise(resolve => setTimeout(resolve, 200)); 
-        }
-        isQueueProcessingRef.current = false;
-    };
-
-    const intervalId = setInterval(processQueue, 1000);
-    return () => { isActive = false; clearInterval(intervalId); };
-  }, [masterThumbScan]);
 
   const handleTextChange = async (text) => {
     setQuery(text);
@@ -240,7 +112,6 @@ export default function SearchSettingScreen({ route }) {
     });
   };
 
-  // 🚨 [NEW] Thumbnail Quality Getter (Synced with Global & Home Screen)
   const getDynamicThumbnail = (thumbnailObj, videoId) => {
       if (masterThumbQuality === 'Data Saver' && videoId) return `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`;
       if (!thumbnailObj || !thumbnailObj.thumbnails || thumbnailObj.thumbnails.length === 0) return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
@@ -296,8 +167,6 @@ export default function SearchSettingScreen({ route }) {
   const fetchSearchResults = async (searchQuery) => {
     setIsSearching(true);
     setSearchResults([]);
-    scanQueueRef.current = []; 
-    setThumbStates({});
 
     try {
       const response = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
@@ -310,15 +179,7 @@ export default function SearchSettingScreen({ route }) {
 
       if (match && match[1]) {
         const jsonData = JSON.parse(match[1]);
-        const { finalFeed, nextToken, thumbQueue } = processYouTubeData(jsonData);
-        
-        const initialStates = {};
-        thumbQueue.forEach(item => {
-            initialStates[item.id] = masterThumbScan ? 'pending' : 'clean';
-            if (masterThumbScan) scanQueueRef.current.push(item);
-        });
-        setThumbStates(prev => ({...prev, ...initialStates}));
-
+        const { finalFeed, nextToken } = processYouTubeData(jsonData);
         setSearchResults(finalFeed);
         setContinuationToken(nextToken);
       }
@@ -338,16 +199,7 @@ export default function SearchSettingScreen({ route }) {
         })
       });
       const data = await response.json();
-      const { finalFeed, nextToken, thumbQueue } = processYouTubeData(data);
-
-      const initialStates = {};
-      thumbQueue.forEach(item => {
-          if (!thumbStates[item.id]) {
-              initialStates[item.id] = masterThumbScan ? 'pending' : 'clean';
-              if (masterThumbScan) scanQueueRef.current.push(item);
-          }
-      });
-      setThumbStates(prev => ({...prev, ...initialStates}));
+      const { finalFeed, nextToken } = processYouTubeData(data);
 
       setSearchResults(prev => [...prev, ...finalFeed]);
       setContinuationToken(nextToken);
@@ -384,7 +236,6 @@ export default function SearchSettingScreen({ route }) {
     extractNodes(jsonData);
 
     const finalFeed = [];
-    const thumbQueue = []; 
 
     extractedChannels.forEach(ch => {
       const avatarUrl = getDynamicThumbnail(ch.thumbnail, null) || 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg';
@@ -403,7 +254,6 @@ export default function SearchSettingScreen({ route }) {
       if (vidId && title && !uniqueShortsMap.has(vidId)) {
         let thumbUrl = getDynamicThumbnail(s.thumbnail, vidId);
         uniqueShortsMap.set(vidId, { id: vidId, title: title, views: s.viewCountText?.simpleText || 'N/A', thumbnail: thumbUrl, type: 'short' });
-        thumbQueue.push({ id: vidId, url: thumbUrl });
       }
     });
 
@@ -424,12 +274,11 @@ export default function SearchSettingScreen({ route }) {
           avatar: avatarUrl ? (avatarUrl.startsWith('//') ? 'https:' + avatarUrl : avatarUrl) : 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg',
           channelUrl: v.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url || ''
         });
-        thumbQueue.push({ id: v.videoId, url: thumbUrl });
       }
     });
 
     finalFeed.push(...Array.from(uniqueVideosMap.values()));
-    return { finalFeed, nextToken, thumbQueue };
+    return { finalFeed, nextToken };
   };
 
   const toggleVideoScan = (id) => {
@@ -453,34 +302,6 @@ export default function SearchSettingScreen({ route }) {
     }, 0);
   };
 
-  // 🤖 [FIXED] THUMBNAIL RENDERER - Always forces a dark overlay if blur fails
-  const renderAiThumbnail = (itemUrl, itemId, isShort = false) => {
-      const state = thumbStates[itemId] || 'pending';
-
-      if (state === 'pending' || state === 'scanning') {
-          return (
-              <View style={[isShort ? styles.shortThumb : styles.thumbnail, { backgroundColor: '#111', justifyContent: 'center', alignItems: 'center' }]}>
-                  {state === 'scanning' ? <ActivityIndicator size="small" color="#00FF00" /> : <Ionicons name="scan-outline" size={30} color="#444" />}
-              </View>
-          );
-      }
-
-      // 🚨 [FIXED] Force Black Overlay with "AI CENSORD" text just in case blurRadius misbehaves
-      if (state === 'blur') {
-          return (
-              <View style={[isShort ? styles.shortThumb : styles.thumbnail, { position: 'relative', overflow: 'hidden' }]}>
-                  <Image source={{ uri: itemUrl }} style={[StyleSheet.absoluteFillObject]} blurRadius={Platform.OS === 'ios' ? 20 : 40} />
-                  <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' }]}>
-                      <Ionicons name="eye-off" size={isShort ? 30 : 40} color="rgba(255,255,255,0.9)" />
-                      <Text style={{color: '#FFF', fontSize: 10, marginTop: 4, fontWeight: 'bold'}}>AI CENSORD</Text>
-                  </View>
-              </View>
-          );
-      }
-
-      return <Image source={{ uri: itemUrl }} style={isShort ? styles.shortThumb : styles.thumbnail} />;
-  };
-
   const renderItem = ({ item }) => {
     if (item.type === 'shorts_shelf') {
       return (
@@ -495,13 +316,12 @@ export default function SearchSettingScreen({ route }) {
             renderItem={({item: short}) => (
               <View style={styles.shortCardWrapper}>
                   <TouchableOpacity style={styles.shortCard} activeOpacity={0.9} onPress={() => navigateToShorts(short)}>
-                    {renderAiThumbnail(short.thumbnail, short.id, true)}
+                    <Image source={{ uri: short.thumbnail }} style={styles.shortThumb} />
                     <View style={styles.shortOverlay}>
                       <Text style={styles.shortTitle} numberOfLines={2}>{short.title}</Text>
                       <Text style={styles.shortViews}>{short.views}</Text>
                     </View>
                   </TouchableOpacity>
-                  {/* 🚨 [REMOVED] Shorts-এর নিচে থাকা AI Scan বাটন মুছে দেওয়া হয়েছে */}
               </View>
           )} />
         </View>
@@ -509,11 +329,11 @@ export default function SearchSettingScreen({ route }) {
     }
 
     if (item.type === 'video') {
-      const isScanOn = videoScanSettings[item.id] !== false; // Default true if master is ON
+      const isScanOn = videoScanSettings[item.id] !== false; 
       return (
         <View style={styles.videoCard}>
           <TouchableOpacity activeOpacity={0.9} onPress={() => navigateToPlayer(item)}>
-            {renderAiThumbnail(item.thumbnail, item.id, false)}
+            <Image source={{ uri: item.thumbnail }} style={styles.thumbnail} />
             {item.duration && <View style={styles.duration}><Text style={styles.durationText}>{item.duration}</Text></View>}
           </TouchableOpacity>
           <View style={styles.videoInfo}>
@@ -523,7 +343,6 @@ export default function SearchSettingScreen({ route }) {
               <Text style={styles.videoMeta}>{item.channel} • {item.views} • {item.publishedTime}</Text>
             </View>
             
-            {/* 🚨 [NEW] Master Video Scan অন থাকলেই কেবল এই বাটনটি দেখাবে */}
             {masterVideoScan && (
                 <TouchableOpacity 
                     style={[styles.videoAiScanToggle, { borderColor: isScanOn ? '#00BFA5' : '#555' }]} 
