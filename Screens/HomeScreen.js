@@ -1,1174 +1,383 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking, AppState, Image, Platform, ScrollView } from 'react-native';
-import { useVideoPlayer, VideoView } from 'expo-video'; 
-import { createAudioPlayer, setAudioModeAsync } from 'expo-audio'; 
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, SafeAreaView, StatusBar, ActivityIndicator, Platform, Dimensions, RefreshControl, ScrollView, Switch, BackHandler, DeviceEventEmitter } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { DeviceEventEmitter } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import Slider from '@react-native-community/slider';
-import * as ScreenOrientation from 'expo-screen-orientation'; 
-import * as WebBrowser from 'expo-web-browser'; 
-import AsyncStorage from '@react-native-async-storage/async-storage'; 
+import { useNavigation, useIsFocused } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// 🚨 [REAL AI INTEGRATION PACKAGES]
-import * as ImageManipulator from 'expo-image-manipulator';
-import * as FileSystem from 'expo-file-system/legacy'; 
-import { decode } from 'base64-arraybuffer'; 
-import * as jpeg from 'jpeg-js';
-import { Asset } from 'expo-asset'; 
-import FaceDetection from '@react-native-ml-kit/face-detection';
-import { loadTensorflowModel } from 'react-native-fast-tflite';
+// [NEW] Global Theme & Language Context Imports
+import { useTheme } from '../ThemeContext'; 
+import { useLanguage } from '../LanguageContext'; 
 
-LogBox.ignoreLogs(['Video component', 'expo-audio', 'expo-video']);
+import SettingsScreen from '../Settings/SettingsScreen';
+import ShortsScreen from './ShortsScreen'; 
+import LiveScreen from './livescreen';
 
-const windowDim = Dimensions.get('window');
-const PORTRAIT_WIDTH = Math.min(windowDim.width, windowDim.height);
-const PORTRAIT_HEIGHT = Math.max(windowDim.width, windowDim.height);
+const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const FEED_TOPICS = [ "trending bangladesh", "bangla natok 2026", "bangla new song", "somoy tv live", "cricket highlights", "bangla waz short", "bengali vlog", "bangla news today" ];
+global.aiMemory = global.aiMemory || {};
+global.seenVideoIds = global.seenVideoIds || new Set(); 
 
-const PLAYER_HEIGHT = (PORTRAIT_WIDTH * 9) / 16;
-const MINI_WIDTH = PORTRAIT_WIDTH * 0.45;
-const MINI_HEIGHT = (MINI_WIDTH * 9) / 16;
-
-const MY_API_SERVER = "http://127.0.0.1:10000"; 
-
-const safeSeek = (p, targetSec) => {
-    if (!p) return;
-    try {
-        if (typeof p.seekTo === 'function') p.seekTo(targetSec);
-        else if (typeof p.seekBy === 'function') p.seekBy(targetSec - p.currentTime);
-        else p.currentTime = targetSec; 
-    } catch (e) {}
-};
-
-const safeSetRate = (p, rate) => {
-    if (!p) return;
-    try {
-        if (typeof p.setPlaybackRate === 'function') p.setPlaybackRate(rate);
-        else if (typeof p.setRate === 'function') p.setRate(rate);
-        else p.playbackRate = rate;
-    } catch (e) {}
-};
-
-const safeSetVolume = (p, vol) => {
-    if (!p) return;
-    try {
-        if (typeof p.setVolume === 'function') p.setVolume(vol);
-        else p.volume = vol;
-    } catch(e) {}
-};
-
-const safeSetMuted = (p, isMuted) => {
-    if (!p) return;
-    try {
-        if (typeof p.setMuted === 'function') p.setMuted(isMuted);
-        else p.muted = isMuted;
-    } catch(e) {}
-};
-
-export default function GlobalPlayer() {
+export default function HomeScreen({ route }) {
   const navigation = useNavigation();
-  const videoViewRef = useRef(null); 
-  const syncAudioRef = useRef(null); 
-  
-  const currentVideoIdRef = useRef(null);
-  const fetchIdRef = useRef(0);
-  
-  const scale = useRef(new Animated.Value(1)).current;
-  const baseScaleRef = useRef(1);
-  const initialDistanceRef = useRef(null);
-  const isZoomingRef = useRef(false);
-  
-  const lastTapRef = useRef({ time: 0, side: '' });
-  const tapTimeoutRef = useRef(null);
-  const isSlidingRef = useRef(false); 
+  const isFocused = useIsFocused();
 
-  const [playerState, setPlayerState] = useState('hidden'); 
-  const [isFullscreen, setIsFullscreen] = useState(false); 
-  const [videoData, setVideoData] = useState(null);
-  const [streamUrl, setStreamUrl] = useState(null);
-  const [lowStreamUrl, setLowStreamUrl] = useState(null);
-  
-  const [videoSource, setVideoSource] = useState(null); 
-  const resumeTimeRef = useRef(0); 
+  // [FIXED] গ্লোবাল থিম এবং ল্যাঙ্গুয়েজ হুক ব্যবহার করা হলো
+  const { isDarkMode, toggleDarkMode } = useTheme();
+  const { locale, changeLanguage, t } = useLanguage(); 
 
-  const [streamMode, setStreamMode] = useState('combined');
-  const [isAudioMode, setIsAudioMode] = useState(false);
-  const [fallbackData, setFallbackData] = useState(null);
+  const [activeTab, setActiveTab] = useState('Home');
+  const [meView, setMeView] = useState('main'); 
 
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(1);
-  const [buffered, setBuffered] = useState(0); 
-  const [isPlayingUI, setIsPlayingUI] = useState(false); 
+  const [videos, setVideos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
 
-  const [showControls, setShowControls] = useState(true);
-  const controlsTimeoutRef = useRef(null);
-  
-  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
-  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
-  
-  const [showAiMenu, setShowAiMenu] = useState(false);
-  const [showAiTimeMenu, setShowAiTimeMenu] = useState(false);
-  const [showAiBlurMenu, setShowAiBlurMenu] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedShortId, setSelectedShortId] = useState(null);
+  const [thumbQuality, setThumbQuality] = useState('High');
+  const [activeQuery, setActiveQuery] = useState('');
 
-  const [currentSpeed, setCurrentSpeed] = useState(1.0);
-  
-  const [scanInterval, setScanInterval] = useState(3.0);
-  const [blurTarget, setBlurTarget] = useState('w'); 
-
-  const scanIntervalRef = useRef(3.0);
-  const blurTargetRef = useRef('w');
-  const lowStreamUrlRef = useRef(null); // 🚨
-
-  const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
-  const isAudioModeRef = useRef(false);
-  const streamModeRef = useRef('combined');
-  const cachedAudioUrlRef = useRef(null); 
-  
-  const isSyncingRef = useRef(false);
-  const pendingSeekRef = useRef(null); 
-
-  const [frameList, setFrameList] = useState([]);
-  const aiDataMapRef = useRef({}); 
-  const targetScanSecRef = useRef(0); 
-  const isAiProcessingRef = useRef(false); 
-  const genderModelRef = useRef(null);
-
-  const [isBlurredUI, setIsBlurredUI] = useState(false);
-  const isBlurredRef = useRef(false);
+  const getAlgorithmicTopic = async () => {
+    try {
+      const suffixes = ["", "today", "new", "2026", "latest"];
+      const suffix = suffixes[Math.floor(Math.random() * suffixes.length)];
+      return `${FEED_TOPICS[Math.floor(Math.random() * FEED_TOPICS.length)]} ${suffix}`.trim();
+    } catch (e) { return FEED_TOPICS[0]; }
+  };
 
   useEffect(() => {
-      const loadAiSettings = async () => {
-          try {
-              const savedInterval = await AsyncStorage.getItem('ai_interval');
-              if (savedInterval) {
-                  const val = parseFloat(savedInterval);
-                  setScanInterval(val);
-                  scanIntervalRef.current = val;
-              }
-              const savedTarget = await AsyncStorage.getItem('ai_blur_target');
-              if (savedTarget) {
-                  setBlurTarget(savedTarget);
-                  blurTargetRef.current = savedTarget;
-              }
-          } catch(e){}
-      };
-      loadAiSettings();
-  }, []);
-
-  useEffect(() => {
-    const setupAudio = async () => {
+    const loadGlobalData = async () => {
       try {
-        await setAudioModeAsync({
-          staysActiveInBackground: true,
-          playsInSilentModeIOS: true,
-          shouldDuckAndroid: true,
-          playThroughEarpieceAndroid: false,
-        });
+        const quality = await AsyncStorage.getItem('thumbnailQuality');
+        if (quality) setThumbQuality(quality);
+        if (!activeQuery) setActiveQuery(await getAlgorithmicTopic());
       } catch (e) {}
     };
-    setupAudio();
-  }, []);
+    if (isFocused) loadGlobalData();
+  }, [isFocused]);
 
-  const safeReleaseAudio = () => {
-      if (syncAudioRef.current) {
-          try { syncAudioRef.current.release(); } catch(e) {}
-          syncAudioRef.current = null;
-      }
-  };
-
-  const player = useVideoPlayer(videoSource, (p) => {
-    if (!videoSource) return; 
-    try { p.loop = false; } catch(e) {}
-    safeSetRate(p, currentSpeed); 
-    if (streamModeRef.current === 'separate') {
-        safeSetMuted(p, true); 
+  useEffect(() => {
+    if (route?.params?.executeSearch) {
+        setActiveTab('Home'); setSearchQuery(route.params.executeSearch); setActiveQuery(route.params.executeSearch);
     }
-  });
-
-  const triggerControls = () => {
-    setShowControls(true);
-    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-    controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 4000);
-  };
+    if (route?.params?.targetTab) setActiveTab(route.params.targetTab);
+  }, [route?.params]);
 
   useEffect(() => {
-    const appStateSub = AppState.addEventListener('change', async (nextAppState) => {
-        if (nextAppState.match(/inactive|background/)) {
-            if (!isAudioModeRef.current) {
-                if (player && player.playing) player.pause();
-                if (syncAudioRef.current && syncAudioRef.current.playing) {
-                    syncAudioRef.current.pause();
-                }
-            }
-        }
-    });
-    return () => appStateSub.remove();
-  }, [player]);
+    if (activeQuery) fetchRealVideos(activeQuery, true);
+  }, [activeQuery]);
 
   useEffect(() => {
-    const unsubscribe = navigation.addListener('state', (e) => {
-      if (!e.data.state) return;
-      const routes = e.data.state.routes;
-      const currentRoute = routes[routes.length - 1].name;
-      
-      if (currentRoute !== 'Player' && currentRoute !== 'PlayerScreen') {
-          setPlayerState((prev) => {
-              if (prev === 'full' || prev === 'center' || prev === 'fullscreen') {
-                  if (isFullscreen) {
-                      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-                      setIsFullscreen(false);
-                  }
-                  return 'mini';
-              }
-              return prev;
-          });
-      }
-    });
-    return unsubscribe;
-  }, [navigation, isFullscreen]);
-
-  const handleSmartBack = () => {
-      if (playerState === 'fullscreen') {
-          toggleFullscreen(); 
-          return true;
-      } else if (playerState === 'center' || playerState === 'full') {
-          setPlayerState('mini');
-          const state = navigation.getState();
-          if (state && state.routes) {
-              const routes = state.routes;
-              for (let i = routes.length - 1; i >= 0; i--) {
-                  if (routes[i].name !== 'Player' && routes[i].name !== 'PlayerScreen') {
-                      navigation.navigate(routes[i].name);
-                      return true;
-                  }
-              }
-          }
-          navigation.navigate('Home'); 
-          return true;
+    const backAction = () => {
+      if (activeTab === 'ME' && meView !== 'main') {
+        setMeView('main');
+        return true;
       }
       return false;
-  };
-
-  useEffect(() => {
-    const backHandler = BackHandler.addEventListener('hardwareBackPress', handleSmartBack);
-    return () => backHandler.remove();
-  }, [playerState, navigation, isFullscreen]);
-
-  useEffect(() => {
-      Animated.spring(scale, { toValue: 1, useNativeDriver: false }).start();
-      baseScaleRef.current = 1;
-  }, [playerState]);
-
-  const toggleFullscreen = async () => {
-    try {
-        if (isFullscreen) {
-            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-            setIsFullscreen(false);
-            setPlayerState('full'); 
-            scale.setValue(1); 
-            baseScaleRef.current = 1;
-        } else {
-            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
-            setIsFullscreen(true);
-            setPlayerState('fullscreen');
-            scale.setValue(1); 
-            baseScaleRef.current = 1;
-        }
-    } catch (error) {}
-  };
-
-  // 🚨 [NEW] সার্ভারের পাইপকে ট্রিগার করার জন্য ফাংশন
-  const startAiPipe = async (time) => {
-      if (!lowStreamUrlRef.current) return;
-      try {
-          await fetch(`${MY_API_SERVER}/api/start-ai-pipe?url=${encodeURIComponent(lowStreamUrlRef.current)}&time=${time}&interval=${scanIntervalRef.current}`);
-      } catch (e) {}
-  };
-
-  const seekTo = async (newTime) => {
-      setCurrentTime(newTime); 
-      // 🚨 যখনই ইউজার ভিডিও টানবে, সাথে সাথে পাইপ রিস্টার্ট হবে
-      targetScanSecRef.current = parseFloat(newTime.toFixed(1));
-      startAiPipe(targetScanSecRef.current);
-
-      try {
-          if (isAudioModeRef.current) {
-              safeSeek(syncAudioRef.current, newTime); 
-          } else {
-              safeSeek(player, newTime); 
-              if (streamModeRef.current === 'separate' && syncAudioRef.current) {
-                  safeSeek(syncAudioRef.current, newTime); 
-              }
-          }
-      } catch (error) { }
-  };
-
-  useEffect(() => {
-    const playSub = DeviceEventEmitter.addListener('playVideo', async (data) => {
-      if (currentVideoIdRef.current === data.videoId) {
-          setPlayerState('full');
-          if (isFullscreen) toggleFullscreen();
-          return;
-      }
-
-      fetchIdRef.current = Date.now();
-      currentVideoIdRef.current = data.videoId;
-      setVideoData(data.videoData);
-      setPlayerState('full');
-      
-      setStreamUrl(null);
-      setVideoSource(null); 
-      setLowStreamUrl(null); 
-      lowStreamUrlRef.current = null;
-      resumeTimeRef.current = 0; 
-      
-      setFallbackData(null);
-      setIsAudioMode(false);
-      isAudioModeRef.current = false;
-      cachedAudioUrlRef.current = null;
-      pendingSeekRef.current = null;
-      
-      aiDataMapRef.current = {};
-      targetScanSecRef.current = 0; 
-      isAiProcessingRef.current = false;
-      setFrameList([]); 
-
-      setIsBlurredUI(false);
-      isBlurredRef.current = false;
-
-      setCurrentTime(0);
-      setBuffered(0);
-      scale.setValue(1);
-      baseScaleRef.current = 1;
-      triggerControls();
-
-      safeReleaseAudio();
-
-      const targetQuality = global.appSettings?.normalVideo || '720p';
-      fetchStreamUrl(data.videoId, targetQuality, fetchIdRef.current);
-    });
-
-    const audioModeSub = DeviceEventEmitter.addListener('toggleAudioMode', async (mode) => {
-      setIsAudioMode(mode);
-      isAudioModeRef.current = mode;
-
-      if (mode) {
-          resumeTimeRef.current = player ? player.currentTime : currentTime;
-          if (player) player.pause();
-          setVideoSource(null); 
-          setIsPlayingUI(true); 
-
-          if (streamModeRef.current === 'separate' && syncAudioRef.current) {
-              if (!syncAudioRef.current.playing) syncAudioRef.current.play();
-          } else {
-              let audioUrlToPlay = cachedAudioUrlRef.current;
-              if (!audioUrlToPlay) {
-                  try {
-                      const res = await fetch(`${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&action=play&type=audio`);
-                      const json = await res.json();
-                      if (json.success && (json.audioUrl || json.url)) {
-                          audioUrlToPlay = json.audioUrl || json.url;
-                          cachedAudioUrlRef.current = audioUrlToPlay; 
-                      }
-                  } catch (e) {}
-              }
-              if (audioUrlToPlay) {
-                  safeReleaseAudio();
-                  syncAudioRef.current = createAudioPlayer(audioUrlToPlay);
-                  pendingSeekRef.current = resumeTimeRef.current; 
-                  safeSetRate(syncAudioRef.current, currentSpeed); 
-                  syncAudioRef.current.play();
-              }
-          }
-      } else {
-          let resumeVideoTime = resumeTimeRef.current;
-
-          if (syncAudioRef.current) {
-              resumeVideoTime = syncAudioRef.current.currentTime;
-              if (streamModeRef.current !== 'separate') {
-                  safeReleaseAudio();
-              } else {
-                  syncAudioRef.current.pause();
-              }
-          }
-
-          resumeTimeRef.current = resumeVideoTime;
-          setVideoSource(streamUrl); 
-      }
-    });
-
-    return () => {
-        playSub.remove();
-        audioModeSub.remove();
     };
-  }, [isFullscreen, streamUrl]);
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => backHandler.remove();
+  }, [activeTab, meView]);
 
-  useEffect(() => {
-      let timeoutId;
-      if (!isAudioMode && videoSource && player) {
-          timeoutId = setTimeout(async () => {
-              try {
-                  if (resumeTimeRef.current > 0) {
-                      safeSeek(player, resumeTimeRef.current); 
-                  }
-                  player.play();
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    setActiveQuery(await getAlgorithmicTopic());
+  };
 
-                  if (streamModeRef.current === 'separate' && syncAudioRef.current) {
-                      safeSeek(syncAudioRef.current, resumeTimeRef.current); 
-                      syncAudioRef.current.play();
-                  }
-              } catch (e) {}
-          }, 800); 
-      }
-      return () => clearTimeout(timeoutId);
-  }, [videoSource, isAudioMode]);
+  const loadMoreVideos = async () => {
+    if (isFetchingMore || loading) return; 
+    setIsFetchingMore(true);
+    await fetchRealVideos(await getAlgorithmicTopic(), false);
+    setIsFetchingMore(false);
+  };
 
-  const fetchStreamUrl = async (vidId, targetQuality, fetchId) => {
+  const getHighQualityThumbnail = (thumbnailObj, videoId) => {
+    if (thumbQuality === 'Data Saver' && videoId) return `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`;
+    if (!thumbnailObj || !thumbnailObj.thumbnails || thumbnailObj.thumbnails.length === 0) return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+    let bestImgUrl = thumbnailObj.thumbnails[thumbnailObj.thumbnails.length - 1].url;
+    return bestImgUrl.startsWith('//') ? 'https:' + bestImgUrl : bestImgUrl;
+  };
+
+  const fetchRealVideos = async (query, isNewSearch = false, retryCount = 0) => {
+    if (isNewSearch && retryCount === 0) setLoading(true);
     try {
-      const qStr = targetQuality.toString().toUpperCase();
-      let reqQ = 720;
-      if (qStr.includes('8K') || qStr.includes('4320')) reqQ = 4320;
-      else if (qStr.includes('4K') || qStr.includes('2160')) reqQ = 2160;
-      else if (qStr.includes('2K') || qStr.includes('1440')) reqQ = 1440;
-      else reqQ = parseInt(qStr.replace(/\D/g, '')) || 720;
-      
-      const res = await fetch(`${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${vidId}`)}&quality=${reqQ}&action=play`);
-      const json = await res.json();
+      const response = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
+      const htmlText = await response.text();
+      let match = htmlText.match(/ytInitialData\s*=\s*({.+?});/) || htmlText.match(/var ytInitialData = (.*?);<\/script>/);
 
-      if (fetchId !== fetchIdRef.current) return;
+      if (match && match[1]) {
+        const jsonData = JSON.parse(match[1]);
+        const extractedVideos = [];
+        const extractedShorts = [];
 
-      if (json.success && json.url) {
-          if (json.lowQualityUrl) {
-              setLowStreamUrl(json.lowQualityUrl); 
-              lowStreamUrlRef.current = json.lowQualityUrl;
-              // 🚨 ভিডিও লোড হলেই প্রথম পাইপ চালু হবে
-              startAiPipe(0);
-          }
-          
-          const resQ = parseInt(json.quality) || 720;
-          if (reqQ > resQ) {
-              setFallbackData({ reqQ, resQ, data: json, message: `Requested ${reqQ}p is not available. Play ${resQ}p instead?` });
-              return;
-          }
-          startPlayback(json);
-      }
-    } catch(e) {}
-  };
-
-  const startPlayback = async (json) => {
-    setStreamMode(json.streamType || 'combined');
-    streamModeRef.current = json.streamType || 'combined';
-    cachedAudioUrlRef.current = json.audioUrl || null; 
-    
-    setStreamUrl(json.url);
-    setVideoSource(json.url); 
-    
-    if (json.audioUrl && streamModeRef.current === 'separate') {
-        safeReleaseAudio();
-        syncAudioRef.current = createAudioPlayer(json.audioUrl);
-        safeSetVolume(syncAudioRef.current, 1.0); 
-        safeSetRate(syncAudioRef.current, currentSpeed); 
-        syncAudioRef.current.play();
-    }
-  };
-
-  // 🤖 -------------------- AI ENGINE START -------------------- 🤖
-  const loadGenderModelAsync = async () => {
-      if (!genderModelRef.current) {
-          try {
-              const asset = Asset.fromModule(require('../assets/gender_classification.tflite'));
-              await asset.downloadAsync();
-              genderModelRef.current = await loadTensorflowModel({ url: asset.localUri || asset.uri }, []);
-          } catch (e) { }
-      }
-  };
-
-  const processFrameForGender = async (uri) => {
-      try {
-          const faces = await FaceDetection.detect(uri);
-          if (faces && faces.length > 0) {
-              let hasFemale = false; let hasMale = false;
-
-              for (let i = 0; i < faces.length; i++) {
-                  const face = faces[i];
-                  const box = face.frame || face.bounds || {}; 
-                  
-                  let padding = 20; 
-                  let originX = Math.floor(Math.max(0, (box.left ?? box.x ?? box.originX ?? 0) - padding / 2));
-                  let originY = Math.floor(Math.max(0, (box.top ?? box.y ?? box.originY ?? 0) - padding));
-                  let width = Math.floor(Math.max(10, (box.width ?? 0) + padding));
-                  let height = Math.floor(Math.max(10, (box.height ?? 0) + padding * 1.5)); 
-                  
-                  const croppedFace = await ImageManipulator.manipulateAsync(
-                      uri, [{ crop: { originX, originY, width, height } }], { compress: 1, format: ImageManipulator.SaveFormat.JPEG }
-                  );
-                  
-                  await loadGenderModelAsync();
-                  const base64Data = await FileSystem.readAsStringAsync(croppedFace.uri, { encoding: FileSystem.EncodingType.Base64 });
-                  const rawBuffer = new Uint8Array(decode(base64Data));
-                  const rawImageData = jpeg.decode(rawBuffer, { useTArray: true });
-
-                  const pureInputBuffer = new ArrayBuffer(224 * 224 * 3 * 4);
-                  const inputData = new Float32Array(pureInputBuffer);
-
-                  let rgbIndex = 0;
-                  for (let j = 0; j < rawImageData.data.length; j += 4) {
-                      inputData[rgbIndex++] = rawImageData.data[j] / 255.0;     
-                      inputData[rgbIndex++] = rawImageData.data[j + 1] / 255.0; 
-                      inputData[rgbIndex++] = rawImageData.data[j + 2] / 255.0; 
-                  }
-
-                  const output = await genderModelRef.current.run([pureInputBuffer]);
-                  let probability = output && output.length > 0 ? new Float32Array(output[0])[0] : 0;
-                  
-                  if (probability >= 0.35) { hasFemale = true; } 
-                  else { hasMale = true; }
-              }
-              
-              if (hasFemale && hasMale) return 'b'; 
-              if (hasFemale) return 'w';
-              if (hasMale) return 'm';
-          }
-          return 'none';
-      } catch (error) { return 'none'; }
-  };
-
-  useEffect(() => {
-      let isQueueActive = true;
-
-      const processQueue = async () => {
-          while (isQueueActive) {
-              if (player && player.playing && player.duration > 0) break;
-              await new Promise(r => setTimeout(r, 500));
-          }
-
-          if (!isQueueActive) return;
-
-          console.log(`🚀 Zero-Data Pipe Engine Started... Scan Interval: ${scanIntervalRef.current}s`);
-
-          while (isQueueActive) {
-              if (!lowStreamUrlRef.current || !videoSource) {
-                  await new Promise(r => setTimeout(r, 1000));
-                  continue;
-              }
-
-              let targetSec = parseFloat(targetScanSecRef.current.toFixed(1)); 
-              const vDuration = player ? player.duration : 0;
-
-              if (vDuration > 0 && targetSec > vDuration) {
-                  await new Promise(r => setTimeout(r, 2000));
-                  continue;
-              }
-
-              if (aiDataMapRef.current[targetSec] !== undefined) {
-                  targetScanSecRef.current = parseFloat((targetSec + scanIntervalRef.current).toFixed(1));
-                  continue;
-              }
-
-              isAiProcessingRef.current = true;
-              try {
-                  // 🚨 নতুন সার্ভার রাউট (Pipe Frame) থেকে ফ্রেম নেওয়া হচ্ছে
-                  const response = await fetch(`${MY_API_SERVER}/api/get-pipe-frame?time=${targetSec}`);
-                  const data = await response.json();
-
-                  if (data.success && data.frameUrl) {
-                      const tempLocalPath = `${FileSystem.cacheDirectory}temp_frame_${targetSec}.jpg`;
-                      await FileSystem.downloadAsync(data.frameUrl, tempLocalPath);
-                      
-                      const result = await processFrameForGender(tempLocalPath);
-                      aiDataMapRef.current[targetSec] = { gender: result, size: 0 };
-                      
-                      setFrameList(prev => {
-                          const updated = [...prev, { time: targetSec, url: data.frameUrl, gender: result }];
-                          return updated.sort((a, b) => a.time - b.time);
-                      });
-
-                      console.log(`✅ Scanned [${targetSec}s] -> Result: [${result}]`);
-                      
-                      await FileSystem.deleteAsync(tempLocalPath, { idempotent: true });
-                      targetScanSecRef.current = parseFloat((targetSec + scanIntervalRef.current).toFixed(1));
-                  } else if (data.status === 'processing') {
-                      // ফ্রেম রেডি না হলে একটু অপেক্ষা করবে, নতুন প্রসেস চালু করবে না
-                      await new Promise(r => setTimeout(r, 200));
-                  } else {
-                      await new Promise(r => setTimeout(r, 500));
-                  }
-              } catch(e) {
-              } finally {
-                  isAiProcessingRef.current = false;
-              }
-
-              await new Promise(r => setTimeout(r, 50)); 
-          }
-      };
-
-      processQueue();
-      return () => { isQueueActive = false; };
-  }, [player, videoSource]);
-  // 🤖 -------------------- AI ENGINE END -------------------- 🤖
-
-  const handleSkip = async (amount, isSilent = false) => {
-      let currentPosition = isAudioMode ? currentTime : (player ? player.currentTime : currentTime);
-      let newTime = currentPosition + amount;
-      
-      if (newTime < 0) newTime = 0;
-      if (newTime > duration) newTime = duration;
-      
-      await seekTo(newTime);
-      if (!isSilent) triggerControls(); 
-  };
-
-  const handleTap = (side) => {
-      const now = Date.now();
-      const DOUBLE_TAP_DELAY = 300; 
-      
-      if (lastTapRef.current.side === side && (now - lastTapRef.current.time) < DOUBLE_TAP_DELAY) {
-          clearTimeout(tapTimeoutRef.current);
-          lastTapRef.current = { time: 0, side: '' }; 
-          handleSkip(side === 'right' ? 10 : -10, true); 
-      } else {
-          lastTapRef.current = { time: now, side };
-          tapTimeoutRef.current = setTimeout(() => {
-              setShowControls(prev => {
-                  const next = !prev;
-                  if (next) triggerControls();
-                  return next;
-              });
-              lastTapRef.current = { time: 0, side: '' };
-          }, DOUBLE_TAP_DELAY);
-      }
-  };
-
-  const changeSpeed = async (speed) => {
-      setCurrentSpeed(speed);
-      safeSetRate(player, speed); 
-      safeSetRate(syncAudioRef.current, speed); 
-      setShowSpeedMenu(false);
-      setShowSettingsMenu(false);
-  };
-
-  useEffect(() => {
-    const interval = setInterval(async () => {
-        if (isSyncingRef.current) return; 
-
-        if (isAudioMode) {
-            // Audio Sync logic remains same
-        } else {
-            setIsPlayingUI(player?.playing || false);
-            
-            if (player) {
-                if (!isSlidingRef.current && (player.currentTime > 0 || player.playing)) {
-                    setCurrentTime(player.currentTime);
-                    if (player.duration > 0) setDuration(player.duration);
-
-                    // 🚨 [DYNAMIC CENSOR LOGIC]
-                    let activeKey = 0;
-                    const keys = Object.keys(aiDataMapRef.current).map(Number).sort((a,b) => a - b);
-                    for (let i = 0; i < keys.length; i++) {
-                        if (keys[i] <= player.currentTime) activeKey = keys[i];
-                        else break;
-                    }
-                    
-                    const blockData = aiDataMapRef.current[activeKey];
-                    const target = blurTargetRef.current;
-                    const needBlur = blockData && (blockData.gender === target || blockData.gender === 'b');
-
-                    if (needBlur !== isBlurredRef.current) {
-                        isBlurredRef.current = needBlur;
-                        setIsBlurredUI(needBlur);
-                    }
+        const extractNodes = (node) => {
+          if (Array.isArray(node)) node.forEach(extractNodes);
+          else if (node && typeof node === 'object') {
+            if (node.videoRenderer) {
+                const channelName = node.videoRenderer.ownerText?.runs?.[0]?.text || '';
+                const titleText = node.videoRenderer.title?.runs?.[0]?.text?.toLowerCase() || '';
+                if (channelName.trim().startsWith('@') || titleText.includes('short') || titleText.includes('শর্ট')) {
+                    extractedShorts.push({ videoId: node.videoRenderer.videoId });
+                } else {
+                    extractedVideos.push(node.videoRenderer);
                 }
             }
-        }
-    }, 200); // 🚨 Fast UI Update for perfect blur timing
-    return () => clearInterval(interval);
-  }, [player, streamMode, isAudioMode, videoSource]);
+            else Object.values(node).forEach(extractNodes);
+          }
+        };
+        extractNodes(jsonData);
 
-  const videoPanResponder = useRef(PanResponder.create({
-      onStartShouldSetPanResponder: () => false, 
-      onMoveShouldSetPanResponder: (evt, gestureState) => {
-          const touches = evt.nativeEvent.touches;
-          if (touches && touches.length >= 2) return true; 
-          if (Math.abs(gestureState.dx) > 15 || Math.abs(gestureState.dy) > 15) return true; 
-          return false;
-      },
-      onPanResponderGrant: (evt) => {
-          const touches = evt.nativeEvent.touches;
-          if (touches && touches.length >= 2) {
-              isZoomingRef.current = true;
-              const dx = touches[0].pageX - touches[1].pageX;
-              const dy = touches[0].pageY - touches[1].pageY;
-              initialDistanceRef.current = Math.sqrt(dx*dx + dy*dy);
-          }
-      },
-      onPanResponderMove: (evt, gestureState) => {
-          const touches = evt.nativeEvent.touches;
-          if (touches && touches.length >= 2 && initialDistanceRef.current) {
-              isZoomingRef.current = true;
-              const dx = touches[0].pageX - touches[1].pageX;
-              const dy = touches[0].pageY - touches[1].pageY;
-              const currentDistance = Math.sqrt(dx*dx + dy*dy);
+        const freshVideos = extractedVideos.filter(vid => {
+            if (global.seenVideoIds.has(vid.videoId)) return false;
+            global.seenVideoIds.add(vid.videoId); return true;
+        });
 
-              let newScale = baseScaleRef.current * (currentDistance / initialDistanceRef.current);
-              if (newScale < 0.2) newScale = 0.2; 
-              if (newScale > 6.0) newScale = 6.0; 
-              scale.setValue(newScale);
-          }
-      },
-      onPanResponderRelease: (evt, gestureState) => {
-          if (isZoomingRef.current) {
-              baseScaleRef.current = scale._value;
-              initialDistanceRef.current = null;
-              setTimeout(() => { isZoomingRef.current = false; }, 100);
-              return;
-          }
-          if (gestureState.dy > 50 && Math.abs(gestureState.vy) > 0.5) {
-              setPlayerState(prev => {
-                  if (prev === 'fullscreen') { toggleFullscreen(); return 'mini'; }
-                  if (prev === 'full') return 'center'; 
-                  if (prev === 'center') { handleSmartBack(); return 'mini'; }
-                  return prev;
-              });
-          } else if (gestureState.dy < -50 && Math.abs(gestureState.vy) > 0.5) {
-              setPlayerState(prev => {
-                  if (prev === 'center') return 'full'; 
-                  return prev;
-              });
-          } 
-          else if (Math.abs(gestureState.dx) < 15 && Math.abs(gestureState.dy) < 15) {
-              const side = gestureState.x0 < (PORTRAIT_WIDTH / 2) ? 'left' : 'right';
-              handleTap(side);
-          }
-      },
-      onPanResponderTerminate: () => {
-          if (isZoomingRef.current) {
-              baseScaleRef.current = scale._value;
-              initialDistanceRef.current = null;
-              isZoomingRef.current = false;
-          }
+        const formattedVideos = freshVideos.map(vid => ({
+            id: vid.videoId, title: vid.title?.runs?.[0]?.text || 'No Title', channel: vid.ownerText?.runs?.[0]?.text || 'Channel',
+            views: vid.shortViewCountText?.simpleText || 'N/A', duration: vid.lengthText?.simpleText || '', publishedTime: vid.publishedTimeText?.simpleText || '',
+            thumbnail: getHighQualityThumbnail(vid.thumbnail, vid.videoId), 
+            avatar: getHighQualityThumbnail(vid.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail, null), type: 'video'
+        }));
+        setVideos(isNewSearch ? formattedVideos : [...videos, ...formattedVideos]);
       }
-  })).current;
-
-  const miniPanResponder = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => false, 
-    onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 10 || Math.abs(gestureState.dy) > 10,
-    onPanResponderGrant: () => { pan.setOffset({ x: pan.x._value, y: pan.y._value }); pan.setValue({ x: 0, y: 0 }); },
-    onPanResponderMove: Animated.event([null, { dx: pan.x, dy: pan.y }], { useNativeDriver: false }),
-    onPanResponderRelease: () => {
-      pan.flattenOffset();
-      let x = pan.x._value, y = pan.y._value;
-      if (x > 10) x = 10; if (x < -(PORTRAIT_WIDTH - MINI_WIDTH - 20)) x = -(PORTRAIT_WIDTH - MINI_WIDTH - 20);
-      if (y > 20) y = 20; if (y < -(Dimensions.get('window').height - MINI_HEIGHT - 120)) y = -(Dimensions.get('window').height - MINI_HEIGHT - 120);
-      Animated.spring(pan, { toValue: { x, y }, friction: 6, useNativeDriver: false }).start();
-    }
-  })).current;
-
-  const closePlayer = async () => {
-      setPlayerState('hidden');
-      if (isFullscreen) await toggleFullscreen();
-      setStreamUrl(null);
-      setVideoSource(null); 
-      if (player) player.pause();
-      safeReleaseAudio();
+    } catch (e) {} finally { setLoading(false); setRefreshing(false); }
   };
 
-  const formatTime = (timeInSeconds) => {
-      if (isNaN(timeInSeconds)) return "00:00";
-      const m = Math.floor(timeInSeconds / 60);
-      const s = Math.floor(timeInSeconds % 60);
-      return `${m}:${s.toString().padStart(2, '0')}`;
+  const styles = getDynamicStyles(isDarkMode);
+
+  const renderVideoItem = ({ item }) => {
+    return (
+      <View style={styles.videoCard}>
+        <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate('Player', { videoId: item.id, videoData: item })}>
+          <Image source={{ uri: item.thumbnail }} style={styles.thumbnail} />
+          {item.duration ? <View style={styles.durationBadge}><Text style={styles.durationText}>{item.duration}</Text></View> : null}
+        </TouchableOpacity>
+
+        <View style={styles.videoInfo}>
+          <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Channel', { channelName: item.channel, channelAvatar: item.avatar })}>
+            <Image source={{ uri: item.avatar }} style={styles.channelAvatar} />
+          </TouchableOpacity>
+          <View style={styles.textContainer}>
+            <Text style={styles.title} numberOfLines={2}>{item.title}</Text>
+            <Text style={styles.meta}>{item.channel} • {item.views}</Text>
+          </View>
+        </View>
+      </View>
+    );
   };
 
-  if (playerState === 'hidden') return null;
-  const isInteractiveFull = playerState === 'full' || playerState === 'center' || playerState === 'fullscreen';
+  const MeMenuCard = ({ icon, iconBg, iconColor, title, subtitle, onPress, isSwitch, switchValue, onSwitchChange }) => (
+    <TouchableOpacity style={styles.meMenuCard} activeOpacity={isSwitch ? 1 : 0.8} onPress={isSwitch ? null : onPress}>
+      <View style={[styles.meMenuIconBox, { backgroundColor: iconBg }]}>
+        <Ionicons name={icon} size={22} color={iconColor} />
+      </View>
+      <View style={styles.meMenuTextContent}>
+        <Text style={styles.meMenuTitle}>{title}</Text>
+        <Text style={styles.meMenuSubtitle}>{subtitle}</Text>
+      </View>
+      {isSwitch ? (
+        <Switch 
+          value={switchValue} onValueChange={onSwitchChange} 
+          trackColor={{ false: '#d1d1d1', true: 'rgba(255, 0, 0, 0.5)' }} thumbColor={switchValue ? '#FF0000' : '#f4f3f4'} 
+        />
+      ) : (
+        <Ionicons name="chevron-forward" size={18} color={isDarkMode ? "#555" : "#AAA"} style={{ marginLeft: 8 }} />
+      )}
+    </TouchableOpacity>
+  );
 
-  const bufferedWidth = duration > 0 ? `${(buffered / duration) * 100}%` : '0%';
-  
-  // 🚨 AI Menus Config
-  const timeOptions = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.5, 2.0, 2.5, 3.0];
-  const blurOptions = [{label: 'Man', value: 'm'}, {label: 'Woman', value: 'w'}];
+  const languagesList = [
+    { id: 'bn', name: 'বাংলা' },
+    { id: 'en', name: 'English' },
+    { id: 'hi', name: 'हिन्दी' },
+    { id: 'ur', name: 'اردو' },
+    { id: 'fa', name: 'فارسی' },
+    { id: 'ar', name: 'العربية' }
+  ];
 
   return (
-    <Animated.View 
-        style={[
-            playerState === 'fullscreen' ? styles.fullscreenContainer : 
-            playerState === 'full' ? styles.fullContainer : 
-            playerState === 'center' ? styles.centerContainer : 
-            styles.miniContainer, 
-            playerState === 'mini' && { transform: pan.getTranslateTransform() }
-        ]} 
-        {...(!isInteractiveFull ? miniPanResponder.panHandlers : {})}
-    >
-      <View style={styles.videoWrapper}>
-        
-        {streamUrl && !fallbackData && (
-          <View style={{ flex: 1, width: '100%', height: '100%' }}>
-            
-            <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
-                {videoSource ? (
-                    <View style={{ flex: 1, width: '100%', height: '100%' }}>
-                        <VideoView 
-                            key={videoSource} 
-                            ref={videoViewRef} 
-                            player={player} 
-                            style={styles.video} 
-                            contentFit="contain"
-                            nativeControls={false} 
-                        />
-                        
-                        {isBlurredUI && (
-                            <View style={[StyleSheet.absoluteFillObject, { zIndex: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }]}>
-                                <Image 
-                                    source={{ uri: `https://img.youtube.com/vi/${currentVideoIdRef.current}/hqdefault.jpg` }}
-                                    style={[StyleSheet.absoluteFillObject, { opacity: 0.5 }]}
-                                    blurRadius={25} 
-                                    resizeMode="cover"
-                                />
-                                <Ionicons name="eye-off-outline" size={60} color="rgba(255,255,255,0.8)" />
-                                <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 16, marginTop: 10, fontWeight: 'bold' }}>
-                                    AI Censored ({blurTarget === 'w' ? 'Female' : 'Male'} Detected)
-                                </Text>
-                            </View>
-                        )}
-                    </View>
-                ) : null}
-            </Animated.View>
+    <SafeAreaView style={styles.container}>
+      <StatusBar backgroundColor={isDarkMode ? "#0F0F0F" : "#FFFFFF"} barStyle={isDarkMode ? "light-content" : "dark-content"} translucent={true} />
 
-            {isAudioMode && (
-                <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', zIndex: 2, backgroundColor: '#000' }]}>
-                    <Image 
-                        source={{ uri: `https://img.youtube.com/vi/${currentVideoIdRef.current}/hqdefault.jpg` }}
-                        style={[StyleSheet.absoluteFillObject, { opacity: 0.2 }]}
-                        resizeMode="cover"
-                    />
-                    <Ionicons name="headset" size={70} color="#00BFA5" />
-                    <Text style={{ color: '#00BFA5', marginTop: 15, fontSize: 16, fontWeight: 'bold' }}>
-                        ব্যাকগ্রাউন্ড অডিও মোড চলছে
-                    </Text>
-                    <Text style={{ color: '#DDD', marginTop: 5, fontSize: 12 }}>
-                        ভিডিও পুরোপুরি বন্ধ আছে (ডাটা সাশ্রয়ী)
-                    </Text>
+      {activeTab === 'Home' && (
+        <View style={styles.header}>
+          <View style={styles.logoContainer}>
+             <Ionicons name="logo-youtube" size={28} color="#FF0000" />
+             <Text style={styles.logoText}>{t('MyTube')}</Text>
+          </View>
+          <TouchableOpacity style={styles.searchBar} activeOpacity={0.8} onPress={() => navigation.navigate('searchsettings')}>
+            <Text style={{ flex: 1, color: isDarkMode ? '#888' : '#666', fontSize: 14 }}>{searchQuery || t('search')}</Text>
+            <Ionicons name="search" size={18} color={isDarkMode ? "#AAA" : "#888"} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <View style={styles.mainContent}>
+       {activeTab === 'Home' ? (
+          loading && videos.length === 0 ? ( 
+            <View style={{ paddingTop: 10 }}>
+              {[1, 2, 3].map((key) => (
+                <View key={key} style={styles.skeletonCard}>
+                  <View style={styles.skeletonThumbnail} /><View style={styles.skeletonInfo}><View style={styles.skeletonAvatar} /><View style={styles.skeletonTextContainer}><View style={styles.skeletonTitle} /><View style={styles.skeletonMeta} /></View></View>
                 </View>
+              ))}
+            </View>
+          ) : (
+            <FlatList 
+              data={videos} renderItem={renderVideoItem} keyExtractor={(item, index) => item.id + index.toString()} 
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#FF0000" />} 
+              onEndReached={loadMoreVideos} onEndReachedThreshold={0.5} 
+              ListFooterComponent={isFetchingMore ? <ActivityIndicator size="small" color="#FF0000" style={{ marginVertical: 20 }} /> : null}
+            />
+          )
+        ) : activeTab === 'Live' ? (
+          <LiveScreen /> 
+        ) : activeTab === 'Shorts' ? (
+          <ShortsScreen initialVideoId={selectedShortId} />
+        ) : activeTab === 'Settings' ? (
+          <SettingsScreen />
+        ) : activeTab === 'ME' ? (
+          <View style={styles.meContainer}>
+
+            {meView === 'main' ? (
+              <>
+                <Text style={styles.meSectionTitle}>{t('menu')}</Text>
+                <ScrollView contentContainerStyle={styles.meMenuWrapper} showsVerticalScrollIndicator={false}>
+                   <MeMenuCard 
+                      icon="time" iconBg="rgba(255, 152, 0, 0.12)" iconColor="#FF9800" 
+                      title={t('history')} subtitle={t('historyDesc')} onPress={() => navigation.navigate('History')} 
+                   />
+                   <MeMenuCard 
+                      icon="download" iconBg="rgba(76, 175, 80, 0.12)" iconColor="#4CAF50" 
+                      title={t('download')} subtitle={t('downloadDesc')} 
+                      onPress={() => DeviceEventEmitter.emit('openDownloadScreen')} 
+                   />
+                   <MeMenuCard 
+                      icon="logo-youtube" iconBg="rgba(244, 67, 54, 0.12)" iconColor="#F44336" 
+                      title={t('subscribe')} subtitle={t('subscribeDesc')} onPress={() => navigation.navigate('Subscriptions')} 
+                   />
+                   <MeMenuCard 
+                      icon="list" iconBg="rgba(103, 58, 183, 0.12)" iconColor="#8E24AA" 
+                      title={t('playlist')} subtitle={t('playlistDesc')} onPress={() => navigation.navigate('Playlist')} 
+                   />
+                   <MeMenuCard 
+                      icon="settings-sharp" iconBg="rgba(158, 158, 158, 0.12)" iconColor="#9E9E9E" 
+                      title={t('settings')} subtitle={t('settingsDesc')} onPress={() => setActiveTab('Settings')} 
+                   />
+
+                   <MeMenuCard 
+                      icon="moon" iconBg="rgba(33, 150, 243, 0.12)" iconColor="#2196F3" 
+                      title={t('darkMode')} subtitle={t('darkModeDesc')} isSwitch={true} switchValue={isDarkMode} onSwitchChange={toggleDarkMode}
+                   />
+
+                   <MeMenuCard 
+                      icon="language" iconBg="rgba(233, 30, 99, 0.12)" iconColor="#E91E63" 
+                      title={t('language')} subtitle={t('languageDesc')} onPress={() => setMeView('language')}
+                   />
+                </ScrollView>
+              </>
+            ) : (
+              <View style={{ flex: 1 }}>
+                 <View style={styles.subScreenHeader}>
+                    <TouchableOpacity style={{ padding: 10 }} onPress={() => setMeView('main')}>
+                      <Ionicons name="arrow-back" size={24} color={isDarkMode ? "#FFF" : "#000"} />
+                    </TouchableOpacity>
+                    <Text style={styles.subScreenTitle}>{t('language')}</Text>
+                    <View style={{ width: 44 }} />
+                 </View>
+                 <ScrollView contentContainerStyle={styles.meMenuWrapper}>
+                    {languagesList.map((lang, index) => (
+                      <TouchableOpacity 
+                        key={index} activeOpacity={0.8}
+                        style={[styles.languageItem, locale === lang.id && styles.languageItemSelected]}
+                        onPress={() => { changeLanguage(lang.id); setMeView('main'); }}
+                      >
+                        <Text style={[styles.languageItemText, locale === lang.id && styles.languageItemTextSelected]}>{lang.name}</Text>
+                        {locale === lang.id && <Ionicons name="checkmark-circle" size={24} color="#FF0000" />}
+                      </TouchableOpacity>
+                    ))}
+                 </ScrollView>
+              </View>
             )}
 
           </View>
-        )}
-
-        {isInteractiveFull && !fallbackData && (
-            <View style={styles.tapOverlay} {...videoPanResponder.panHandlers}>
-                <TouchableWithoutFeedback onPress={() => handleTap('left')}><View style={styles.tapHalf} /></TouchableWithoutFeedback>
-                <TouchableWithoutFeedback onPress={() => handleTap('right')}><View style={styles.tapHalf} /></TouchableWithoutFeedback>
-            </View>
-        )}
-
-        {isInteractiveFull && showControls && !fallbackData && (
-          <View style={styles.controls} pointerEvents="box-none">
-             
-             <View style={styles.centerRow} pointerEvents="box-none">
-                <TouchableOpacity onPress={async () => {
-                    if (isAudioMode) {
-                        if (syncAudioRef.current) {
-                            if (syncAudioRef.current.playing) syncAudioRef.current.pause();
-                            else syncAudioRef.current.play();
-                        }
-                    } else if (player) {
-                        if (player.playing) {
-                            player.pause();
-                            if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.pause();
-                        } else {
-                            player.play();
-                            if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.play();
-                        }
-                    }
-                    triggerControls();
-                }}>
-                   <Ionicons name={isPlayingUI ? "pause-circle" : "play-circle"} size={75} color="#FFF" />
-                </TouchableOpacity>
-             </View>
-
-             <View style={styles.bottomBarWrapper} pointerEvents="box-none">
-                
-                {frameList.length > 0 && (
-                    <ScrollView 
-                        horizontal 
-                        showsHorizontalScrollIndicator={false} 
-                        style={styles.storyboardContainer}
-                        contentContainerStyle={{ paddingHorizontal: 15 }}
-                    >
-                        {frameList.map((frame, index) => (
-                            <TouchableOpacity 
-                                key={index} 
-                                style={styles.frameItem} 
-                                onPress={() => seekTo(frame.time)} 
-                            >
-                                <Image source={{ uri: frame.url }} style={styles.frameImg} />
-                                <View style={styles.frameTimeBox}>
-                                    <Text style={styles.frameTimeText}>{formatTime(frame.time)}</Text>
-                                </View>
-                                {frame.gender !== 'none' && (
-                                    <View style={[
-                                        styles.badge, 
-                                        frame.gender === 'w' ? styles.badgeW : 
-                                        frame.gender === 'm' ? styles.badgeM : 
-                                        styles.badgeBoth 
-                                    ]}>
-                                        <Text style={styles.badgeText}>
-                                            {frame.gender === 'w' ? 'W' : frame.gender === 'm' ? 'M' : 'W+M'}
-                                        </Text>
-                                    </View>
-                                )}
-                            </TouchableOpacity>
-                        ))}
-                    </ScrollView>
-                )}
-
-                <View style={styles.bottomBar}>
-                    <Text style={styles.timeTextLeft}>{formatTime(currentTime)}</Text>
-                    
-                    <View style={styles.sliderWrapper}>
-                        <View style={styles.customTrackContainer}>
-                            <View style={[styles.bufferedBar, { width: bufferedWidth }]} />
-                        </View>
-                        <Slider 
-                          style={{ flex: 1, height: 40 }}
-                          minimumValue={0}
-                          maximumValue={duration}
-                          value={currentTime}
-                          onSlidingStart={() => {
-                              isSlidingRef.current = true; 
-                              if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-                          }}
-                          onValueChange={(v) => setCurrentTime(v)} 
-                          onSlidingComplete={async (v) => {
-                              await seekTo(v);
-                              isSlidingRef.current = false; 
-                              triggerControls();
-                          }}
-                          minimumTrackTintColor="#FF0000"
-                          maximumTrackTintColor="transparent" 
-                          thumbTintColor="#FF0000"
-                        />
-                    </View>
-
-                    <Text style={styles.timeTextRight}>{formatTime(duration)}</Text>
-                    
-                    <TouchableOpacity style={{marginLeft: 12}} onPress={() => setShowSettingsMenu(true)}>
-                        <Ionicons name="settings-outline" size={22} color="#FFF" />
-                    </TouchableOpacity>
-
-                    <TouchableOpacity style={{marginLeft: 12}} onPress={toggleFullscreen}>
-                        <Ionicons name={isFullscreen ? "contract" : "expand"} size={22} color="#FFF" />
-                    </TouchableOpacity>
-                </View>
-             </View>
-          </View>
-        )}
-
-        <Modal visible={showSettingsMenu} transparent animationType="fade">
-            <TouchableOpacity style={styles.modalBackdrop} onPress={() => setShowSettingsMenu(false)}>
-                <TouchableOpacity activeOpacity={1} style={styles.settingsMenu}>
-                    <Text style={styles.modalTitle}>Player Settings</Text>
-                    
-                    <TouchableOpacity style={styles.menuItem} onPress={() => { setShowSettingsMenu(false); setShowAiMenu(true); }}>
-                        <Ionicons name="hardware-chip-outline" size={20} color="#00FF00" style={styles.menuIcon} />
-                        <Text style={[styles.menuText, { color: '#00FF00' }]}>System AI Setting</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity style={styles.menuItem} onPress={() => {
-                        setShowSettingsMenu(false);
-                        const ytUrl = `https://www.youtube.com/watch?v=${currentVideoIdRef.current}?app=desktop`; 
-                        Linking.openURL(`googlechrome://navigate?url=${ytUrl}`).catch(() => {
-                            WebBrowser.openBrowserAsync(ytUrl, { presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN });
-                        });
-                    }}>
-                        <Ionicons name="globe-outline" size={20} color="#FFF" style={styles.menuIcon} />
-                        <Text style={styles.menuText}>Open in Browser</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity style={styles.menuItem} onPress={() => { setShowSettingsMenu(false); setShowSpeedMenu(true); }}>
-                        <Ionicons name="speedometer-outline" size={20} color="#FFF" style={styles.menuIcon} />
-                        <Text style={styles.menuText}>Playback Speed ({currentSpeed}x)</Text>
-                    </TouchableOpacity>
-                </TouchableOpacity>
-            </TouchableOpacity>
-        </Modal>
-
-        <Modal visible={showAiMenu} transparent animationType="fade">
-            <TouchableOpacity style={styles.modalBackdrop} onPress={() => setShowAiMenu(false)}>
-                <TouchableOpacity activeOpacity={1} style={styles.settingsMenu}>
-                    <Text style={styles.modalTitle}>System AI Setting</Text>
-                    
-                    <TouchableOpacity style={styles.menuItem} onPress={() => { setShowAiMenu(false); setShowAiTimeMenu(true); }}>
-                        <Ionicons name="timer-outline" size={20} color="#FFF" style={styles.menuIcon} />
-                        <Text style={styles.menuText}>AI Scanning Time ({scanInterval}s)</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity style={styles.menuItem} onPress={() => { setShowAiMenu(false); setShowAiBlurMenu(true); }}>
-                        <Ionicons name="eye-off-outline" size={20} color="#FFF" style={styles.menuIcon} />
-                        <Text style={styles.menuText}>Video Blur System ({blurTarget === 'w' ? 'Woman' : 'Man'})</Text>
-                    </TouchableOpacity>
-                </TouchableOpacity>
-            </TouchableOpacity>
-        </Modal>
-
-        <Modal visible={showAiTimeMenu} transparent animationType="fade">
-            <TouchableOpacity style={styles.modalBackdrop} onPress={() => setShowAiTimeMenu(false)}>
-                <TouchableOpacity activeOpacity={1} style={[styles.settingsMenu, { maxHeight: 400 }]}>
-                    <Text style={styles.modalTitle}>AI Scanning Time</Text>
-                    <ScrollView showsVerticalScrollIndicator={false}>
-                        {timeOptions.map(t => (
-                            <TouchableOpacity key={t} style={styles.menuItem} onPress={async () => {
-                                setScanInterval(t);
-                                scanIntervalRef.current = t;
-                                await AsyncStorage.setItem('ai_interval', t.toString());
-                                setShowAiTimeMenu(false);
-                                // 🚨 সেটিংস বদলালেই নতুন টাইমে পাইপ রিস্টার্ট হবে
-                                targetScanSecRef.current = parseFloat(currentTime.toFixed(1));
-                                startAiPipe(targetScanSecRef.current);
-                            }}>
-                                <Text style={[styles.menuText, scanInterval === t && {color: '#FF0000', fontWeight: 'bold'}]}>
-                                    {t} Seconds
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
-                    </ScrollView>
-                </TouchableOpacity>
-            </TouchableOpacity>
-        </Modal>
-
-        <Modal visible={showAiBlurMenu} transparent animationType="fade">
-            <TouchableOpacity style={styles.modalBackdrop} onPress={() => setShowAiBlurMenu(false)}>
-                <TouchableOpacity activeOpacity={1} style={styles.settingsMenu}>
-                    <Text style={styles.modalTitle}>Target for Blur</Text>
-                    {blurOptions.map(opt => (
-                        <TouchableOpacity key={opt.value} style={styles.menuItem} onPress={async () => {
-                            setBlurTarget(opt.value);
-                            blurTargetRef.current = opt.value;
-                            await AsyncStorage.setItem('ai_blur_target', opt.value);
-                            setShowAiBlurMenu(false);
-                        }}>
-                            <Text style={[styles.menuText, blurTarget === opt.value && {color: '#FF0000', fontWeight: 'bold'}]}>
-                                Blur {opt.label}
-                            </Text>
-                        </TouchableOpacity>
-                    ))}
-                </TouchableOpacity>
-            </TouchableOpacity>
-        </Modal>
-
-        <Modal visible={showSpeedMenu} transparent animationType="fade">
-            <TouchableOpacity style={styles.modalBackdrop} onPress={() => setShowSpeedMenu(false)}>
-                <TouchableOpacity activeOpacity={1} style={styles.settingsMenu}>
-                    <Text style={styles.modalTitle}>Select Speed</Text>
-                    {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map(s => (
-                        <TouchableOpacity key={s} style={styles.menuItem} onPress={() => changeSpeed(s)}>
-                            <Text style={[styles.menuText, currentSpeed === s && {color: '#FF0000', fontWeight: 'bold'}]}>
-                                {s === 1.0 ? 'Normal (1.0x)' : `${s}x`}
-                            </Text>
-                        </TouchableOpacity>
-                    ))}
-                </TouchableOpacity>
-            </TouchableOpacity>
-        </Modal>
-
-        {fallbackData && (
-          <View style={styles.fallbackOverlay}>
-            <Ionicons name="alert-circle" size={50} color="#FFD700" />
-            <Text style={styles.fallbackText}>{fallbackData.message}</Text>
-            <TouchableOpacity style={styles.btn} onPress={() => { startPlayback(fallbackData.data); setFallbackData(null); }}>
-              <Text style={styles.btnText}>OK, Play Highest Quality</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-        
-        {!isInteractiveFull && (
-            <TouchableOpacity activeOpacity={0.9} style={styles.miniTouchableArea} onPress={() => {
-                if (videoData) {
-                    navigation.navigate('Player', { videoId: currentVideoIdRef.current, videoData });
-                    setPlayerState('full');
-                }
-            }}>
-                <View style={styles.miniControlsRow}>
-                    <TouchableOpacity style={styles.miniCtrlBtn} onPress={async () => {
-                        if (isAudioMode) {
-                            if (syncAudioRef.current) {
-                                if (syncAudioRef.current.playing) syncAudioRef.current.pause();
-                                else syncAudioRef.current.play();
-                            }
-                        } else if (player) {
-                            if (player.playing) {
-                                player.pause();
-                                if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.pause();
-                            } else {
-                                player.play();
-                                if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.play();
-                            }
-                        }
-                    }}>
-                        <Ionicons name={isPlayingUI ? "pause" : "play"} size={22} color="#FFF" />
-                    </TouchableOpacity>
-
-                    <TouchableOpacity onPress={closePlayer} style={styles.miniCtrlBtn}>
-                        <Ionicons name="close" size={24} color="#FFF" />
-                    </TouchableOpacity>
-                </View>
-            </TouchableOpacity>
-        )}
+        ) : null}
       </View>
-    </Animated.View>
+
+      <View style={styles.tabBar}>
+        <TouchableOpacity onPress={async () => { setActiveTab('Home'); setActiveQuery(await getAlgorithmicTopic()); }} style={styles.tab}>
+           {activeTab === 'Home' && <View style={styles.activeTabLine} />}
+           <Ionicons name={activeTab==='Home'?'home':'home-outline'} size={22} color={activeTab==='Home'?'#FF0000': (isDarkMode ? '#666' : '#999')} />
+           <Text style={[styles.tabText, activeTab==='Home' && {color:'#FF0000'}]}>{t('home')}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => setActiveTab('Shorts')} style={styles.tab}>
+           {activeTab === 'Shorts' && <View style={styles.activeTabLine} />}
+           <Ionicons name={activeTab==='Shorts'?'play':'play-outline'} size={24} color={activeTab==='Shorts'?'#FF0000': (isDarkMode ? '#666' : '#999')} />
+           <Text style={[styles.tabText, activeTab==='Shorts' && {color:'#FF0000'}]}>{t('shorts')}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => setActiveTab('Live')} style={styles.tab}>
+           {activeTab === 'Live' && <View style={styles.activeTabLine} />}
+           <Ionicons name={activeTab==='Live'?'radio':'radio-outline'} size={24} color={activeTab==='Live'?'#FF0000': (isDarkMode ? '#666' : '#999')} />
+           <Text style={[styles.tabText, activeTab==='Live' && {color:'#FF0000'}]}>{t('live')}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => setActiveTab('ME')} style={styles.tab}>
+           {(activeTab === 'ME' || activeTab === 'Settings') && <View style={styles.activeTabLine} />}
+           <Ionicons name={(activeTab==='ME' || activeTab==='Settings') ? 'person' : 'person-outline'} size={22} color={(activeTab==='ME' || activeTab==='Settings') ? '#FF0000' : (isDarkMode ? '#666' : '#999')} />
+           <Text style={[styles.tabText, (activeTab==='ME' || activeTab==='Settings') && {color:'#FF0000'}]}>{t('me')}</Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  fullscreenContainer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, backgroundColor: '#000', overflow: 'hidden' }, 
-  fullContainer: { position: 'absolute', top: 55, left: 0, width: PORTRAIT_WIDTH, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000', overflow: 'hidden' },
-  centerContainer: { position: 'absolute', top: 0, left: 0, width: PORTRAIT_WIDTH, height: PORTRAIT_HEIGHT, zIndex: 9999, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
-  miniContainer: { position: 'absolute', bottom: 100, right: 20, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', borderRadius: 15, overflow: 'hidden', elevation: 10, borderWidth: 1, borderColor: '#00FF00' },
-  
-  videoWrapper: { flex: 1, justifyContent: 'center', width: '100%', height: '100%' },
-  animatedVideoWrapper: { flex: 1, width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }, 
-  video: { flex: 1, width: '100%', height: '100%' },
-  
-  tapOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', zIndex: 5 }, 
-  tapHalf: { flex: 1 },
-  controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
-  
-  centerRow: { flexDirection: 'row', alignItems: 'center', zIndex: 20 },
-  bottomBarWrapper: { position: 'absolute', bottom: 5, width: '100%', zIndex: 20, flexDirection: 'column' },
-  bottomBar: { width: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15 },
-  
-  storyboardContainer: { marginBottom: 5, height: 75, width: '100%' },
-  frameItem: { width: 100, height: 60, marginRight: 8, borderRadius: 8, overflow: 'hidden', backgroundColor: '#333', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', position: 'relative' },
-  frameImg: { width: '100%', height: '100%', resizeMode: 'cover' },
-  frameTimeBox: { position: 'absolute', bottom: 2, right: 4, backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1 },
-  frameTimeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
-  
-  badge: { position: 'absolute', top: 2, left: 4, borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, elevation: 5 },
-  badgeW: { backgroundColor: '#FF1493' }, 
-  badgeM: { backgroundColor: '#1E90FF' }, 
-  badgeBoth: { backgroundColor: '#8A2BE2' }, 
-  badgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
+const getDynamicStyles = (isDark) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: isDark ? '#000' : '#F5F5F5', paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: isDark ? '#222' : '#E0E0E0', width: '100%', backgroundColor: isDark ? '#0F0F0F' : '#FFFFFF' },
+  logoContainer: { flexDirection: 'row', alignItems: 'center', width: 105 },
+  logoText: { color: isDark ? '#FFF' : '#000', fontSize: 16, fontWeight: 'bold', marginLeft: 4 },
+  searchBar: { flex: 1, flexDirection: 'row', backgroundColor: isDark ? '#222' : '#F0F0F0', borderRadius: 20, marginHorizontal: 8, paddingHorizontal: 12, alignItems: 'center', height: 38 },
+  mainContent: { flex: 1, backgroundColor: isDark ? '#0F0F0F' : '#F9F9F9' },
 
-  timeTextLeft: { color: '#FFF', fontSize: 13, fontWeight: 'bold', minWidth: 40, textAlign: 'center' },
-  timeTextRight: { color: '#FFF', fontSize: 13, fontWeight: 'bold', minWidth: 40, textAlign: 'center' },
-  
-  sliderWrapper: { flex: 1, marginHorizontal: 8, justifyContent: 'center', position: 'relative', height: 40 },
-  customTrackContainer: { position: 'absolute', left: Platform.OS === 'android' ? 15 : 0, right: Platform.OS === 'android' ? 15 : 0, height: 3, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 2, overflow: 'hidden' },
-  bufferedBar: { height: '100%', backgroundColor: 'rgba(144, 238, 144, 0.8)', borderRadius: 2 },
+  videoCard: { marginBottom: 15 },
+  thumbnail: { width: '100%', aspectRatio: 16 / 9, backgroundColor: isDark ? '#111' : '#EAEAEA' },
+  durationBadge: { position: 'absolute', bottom: 8, right: 8, backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 },
+  durationText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
+  videoInfo: { flexDirection: 'row', padding: 12, alignItems: 'center' },
+  channelAvatar: { width: 36, height: 36, borderRadius: 18, marginRight: 12, backgroundColor: isDark ? '#333' : '#CCC' },
+  textContainer: { flex: 1, paddingRight: 10 },
+  title: { color: isDark ? '#FFF' : '#000', fontSize: 14, fontWeight: '500' },
+  meta: { color: isDark ? '#AAA' : '#666', fontSize: 12, marginTop: 4 },
 
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
-  settingsMenu: { width: 250, backgroundColor: '#1A1A1A', borderRadius: 15, padding: 15, elevation: 10 },
-  modalTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 10, textAlign: 'center', borderBottomWidth: 1, borderBottomColor: '#333', paddingBottom: 10 },
-  menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#333' },
-  menuIcon: { marginRight: 10 },
-  menuText: { color: '#FFF', fontSize: 16 },
+  skeletonCard: { backgroundColor: isDark ? '#18181b' : '#FFFFFF', borderRadius: 12, overflow: 'hidden', marginHorizontal: 10, marginBottom: 20, borderWidth: isDark ? 0 : 1, borderColor: '#EEE' },
+  skeletonThumbnail: { width: '100%', aspectRatio: 16 / 9, backgroundColor: isDark ? '#27272a' : '#E0E0E0' },
+  skeletonInfo: { flexDirection: 'row', padding: 12, alignItems: 'center' },
+  skeletonAvatar: { width: 40, height: 40, borderRadius: 20, marginRight: 12, backgroundColor: isDark ? '#27272a' : '#E0E0E0' },
+  skeletonTextContainer: { flex: 1, justifyContent: 'center' },
+  skeletonTitle: { height: 14, backgroundColor: isDark ? '#27272a' : '#E0E0E0', borderRadius: 4, marginBottom: 10, width: '90%' },
+  skeletonMeta: { height: 12, backgroundColor: isDark ? '#27272a' : '#E0E0E0', borderRadius: 4, width: '60%' },
 
-  fallbackOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center', padding: 20, zIndex: 30 },
-  fallbackText: { color: '#FFF', textAlign: 'center', marginVertical: 20, fontSize: 16 },
-  btn: { backgroundColor: '#FF0000', paddingHorizontal: 25, paddingVertical: 12, borderRadius: 10 },
-  btnText: { color: '#FFF', fontWeight: 'bold' },
-  
-  miniTouchableArea: { flex: 1, width: '100%', height: '100%', position: 'absolute', zIndex: 50 },
-  miniControlsRow: { position: 'absolute', top: 5, right: 5, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 15, paddingHorizontal: 5, paddingVertical: 2, alignItems: 'center' },
-  miniCtrlBtn: { padding: 5, marginHorizontal: 3 },
+  tabBar: { flexDirection: 'row', height: 55, borderTopWidth: 1, borderTopColor: isDark ? '#1a1a1a' : '#E0E0E0', backgroundColor: isDark ? '#0a0a0a' : '#FFFFFF', paddingBottom: 5 },
+  tab: { flex: 1, justifyContent: 'center', alignItems: 'center', position: 'relative' },
+  activeTabLine: { position: 'absolute', top: -1, width: '40%', height: 2, backgroundColor: '#FF0000', borderBottomLeftRadius: 2, borderBottomRightRadius: 2 },
+  tabText: { fontSize: 10, color: isDark ? '#666' : '#999', marginTop: 4, fontWeight: '500' },
+
+  meContainer: { flex: 1, backgroundColor: isDark ? '#0F0F0F' : '#F2F2F7', paddingTop: 20 },
+  meSectionTitle: { color: isDark ? '#666' : '#888', fontSize: 12, fontWeight: 'bold', letterSpacing: 1.5, marginLeft: 20, marginBottom: 15 },
+  meMenuWrapper: { paddingHorizontal: 16, paddingBottom: 20 },
+  meMenuCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? '#15171a' : '#FFFFFF', borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: isDark ? '#1f2229' : '#EAEAEA' },
+  meMenuIconBox: { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+  meMenuTextContent: { flex: 1 },
+  meMenuTitle: { color: isDark ? '#FFF' : '#000', fontSize: 16, fontWeight: '600', marginBottom: 4 },
+  meMenuSubtitle: { color: isDark ? '#888' : '#666', fontSize: 12 },
+
+  subScreenHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: isDark ? '#1a1a1a' : '#EAEAEA', marginBottom: 20 },
+  subScreenTitle: { fontSize: 18, fontWeight: 'bold', color: isDark ? '#FFF' : '#000' },
+  languageItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 18, paddingHorizontal: 20, backgroundColor: isDark ? '#15171a' : '#FFFFFF', borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: isDark ? '#1f2229' : '#EAEAEA' },
+  languageItemSelected: { borderColor: '#FF0000', backgroundColor: isDark ? 'rgba(255, 0, 0, 0.05)' : 'rgba(255, 0, 0, 0.03)' },
+  languageItemText: { fontSize: 16, color: isDark ? '#FFF' : '#000' },
+  languageItemTextSelected: { color: '#FF0000', fontWeight: 'bold' }
 });
