@@ -191,12 +191,12 @@ export default function PlayerScreen({ route, navigation }) {
 
   const openDownloadWindow = () => { DeviceEventEmitter.emit('triggerDownloadOverlay', { videoId: videoId, title: videoData?.title, thumbnail: videoData?.thumbnail }); };
 
->>>>>>> b10729fc5330650efa3c192215a70c989abfe763
->>>>>>> 89dbf3b761f5c99b4f88b07cc85334ebe3bd435e
+ b10729fc5330650efa3c192215a70c989abfe763
+ 89dbf3b761f5c99b4f88b07cc85334ebe3bd435e
   const openDownloadWindow = () => { 
       DeviceEventEmitter.emit('triggerDownloadOverlay', { videoId: videoId, title: videoData?.title, thumbnail: videoData?.thumbnail }); 
   };
->>>>>>> 67b1e57cc81a147af16ead7f3a87459775d982e4
+67b1e57cc81a147af16ead7f3a87459775d982e4
 
   const fetchRelatedVideos = async (isLoadMore = false) => {
     if (isLoadMore) setIsLoadingMore(true);
