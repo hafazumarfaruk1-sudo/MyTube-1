@@ -14,9 +14,8 @@ global.shortVideoQuality = global.shortVideoQuality || 'Normal Video Quality';
 global.appSettings.downloadLocation = global.appSettings.downloadLocation || '/storage/emulated/0/MyTube';
 global.appSettings.shortsCacheLimit = global.appSettings.shortsCacheLimit || 3600000;
 
-// 🚨 [NEW] AI & Thumbnail Global Defaults
+// 🚨 [NEW] AI Video & Thumbnail Quality Defaults
 global.appSettings.aiVideoScan = global.appSettings.aiVideoScan ?? 'true';
-global.appSettings.aiThumbScan = global.appSettings.aiThumbScan ?? 'true';
 global.appSettings.aiBlurTarget = global.appSettings.aiBlurTarget || 'w';
 global.appSettings.thumbnailQuality = global.appSettings.thumbnailQuality || 'High';
 
@@ -31,9 +30,10 @@ export default function SettingsScreen() {
   const [selectedLocation, setSelectedLocation] = useState(global.appSettings.downloadLocation);
   const [selectedCacheLimit, setSelectedCacheLimit] = useState(global.appSettings.shortsCacheLimit);
   
-  // 🚨 [NEW] States for AI & Thumbnail Settings
-  const [aiVideoScan, setAiVideoScan] = useState(global.appSettings.aiVideoScan);
-  const [aiThumbSettings, setAiThumbSettings] = useState(`${global.appSettings.aiThumbScan}_${global.appSettings.aiBlurTarget}`);
+  // 🚨 [NEW] Combined State for AI Video Scan & Target
+  const [aiVideoSetting, setAiVideoSetting] = useState(
+      global.appSettings.aiVideoScan === 'false' ? 'false' : `true_${global.appSettings.aiBlurTarget}`
+  );
   const [thumbQuality, setThumbQuality] = useState(global.appSettings.thumbnailQuality);
 
   const [isLoading, setIsLoading] = useState(false);
@@ -46,22 +46,20 @@ export default function SettingsScreen() {
   useEffect(() => {
     const loadSavedSettings = async () => {
       try {
-        const [savedShort, savedAiVid, savedAiThumb, savedAiTarget, savedThumbQ] = await Promise.all([
+        const [savedShort, savedAiVid, savedAiTarget, savedThumbQ] = await Promise.all([
             AsyncStorage.getItem('shortVideoQuality'),
             AsyncStorage.getItem('ai_video_scan_master'),
-            AsyncStorage.getItem('ai_thumb_scan_master'),
             AsyncStorage.getItem('ai_blur_target'),
             AsyncStorage.getItem('thumbnailQuality')
         ]);
 
         if (savedShort) { global.shortVideoQuality = savedShort; setSelectedShortQuality(savedShort); }
-        if (savedAiVid) { global.appSettings.aiVideoScan = savedAiVid; setAiVideoScan(savedAiVid); }
         
-        let thumbScan = savedAiThumb || 'true';
+        let videoScan = savedAiVid || 'true';
         let blurTarget = savedAiTarget || 'w';
-        global.appSettings.aiThumbScan = thumbScan;
+        global.appSettings.aiVideoScan = videoScan;
         global.appSettings.aiBlurTarget = blurTarget;
-        setAiThumbSettings(`${thumbScan}_${blurTarget}`);
+        setAiVideoSetting(videoScan === 'false' ? 'false' : `true_${blurTarget}`);
 
         if (savedThumbQ) { global.appSettings.thumbnailQuality = savedThumbQ; setThumbQuality(savedThumbQ); }
 
@@ -95,16 +93,13 @@ export default function SettingsScreen() {
       { label: '24 Hours', value: 86400000, chip: '24h' }
   ];
   
-  // 🚨 [NEW] Setting Options
+  // 🚨 [NEW] Advanced AI Video Options
   const aiVideoOptions = [
-      { label: 'Enable AI Video Scan', value: 'true', desc: 'প্লেয়ারে ভিডিও স্ক্যানিং চালু থাকবে' },
-      { label: 'Disable AI Video Scan', value: 'false', desc: 'সম্পূর্ণ অ্যাপে ভিডিও স্ক্যানিং বন্ধ থাকবে' }
+      { label: 'Scan & Blur Woman', value: 'true_w', desc: 'ভিডিওতে মহিলা সনাক্ত হলে ব্লার করবে' },
+      { label: 'Scan & Blur Man', value: 'true_m', desc: 'ভিডিওতে পুরুষ সনাক্ত হলে ব্লার করবে' },
+      { label: 'Disable AI Video Scan', value: 'false', desc: 'এআই ভিডিও স্ক্যানিং সম্পূর্ণ বন্ধ থাকবে' }
   ];
-  const aiThumbOptions = [
-      { label: 'Scan & Blur Woman', value: 'true_w', desc: 'থাম্বনেইলে মহিলা ব্লার করবে' },
-      { label: 'Scan & Blur Man', value: 'true_m', desc: 'থাম্বনেইলে পুরুষ ব্লার করবে' },
-      { label: 'Disable Thumbnail Scan', value: 'false_w', desc: 'থাম্বনেইল স্ক্যানিং পুরোপুরি বন্ধ থাকবে' }
-  ];
+
   const thumbQualityOptions = [
       { label: 'High Quality', value: 'High', desc: 'সর্বোচ্চ রেজোলিউশন (ডাটা বেশি কাটবে)' },
       { label: 'Data Saver', value: 'Data Saver', desc: 'নিম্ন রেজোলিউশন (ডাটা সাশ্রয়ী)' }
@@ -121,16 +116,30 @@ export default function SettingsScreen() {
     setTimeout(() => { setIsLoading(false); setCurrentView('main'); }, 600);
   };
 
-  const handleAiThumbSelect = async (comboValue) => {
+  // 🚨 [NEW] Instant Update Handler for AI Video Scanning
+  const handleAiVideoSelect = async (comboValue) => {
       setIsLoading(true);
-      const [scan, target] = comboValue.split('_');
-      try {
-          global.appSettings.aiThumbScan = scan;
-          global.appSettings.aiBlurTarget = target;
-          setAiThumbSettings(comboValue);
-          await AsyncStorage.setItem('ai_thumb_scan_master', scan);
-          await AsyncStorage.setItem('ai_blur_target', target);
-      } catch (e) {}
+      let scan = 'true';
+      let target = 'w';
+
+      if (comboValue === 'false') {
+          scan = 'false';
+          target = aiVideoSetting.includes('_') ? aiVideoSetting.split('_')[1] : 'w'; 
+      } else {
+          [scan, target] = comboValue.split('_');
+      }
+
+      global.appSettings.aiVideoScan = scan;
+      global.appSettings.aiBlurTarget = target;
+      setAiVideoSetting(comboValue === 'false' ? 'false' : comboValue);
+
+      await AsyncStorage.setItem('ai_video_scan_master', scan);
+      await AsyncStorage.setItem('ai_blur_target', target);
+
+      // INSTANT EMISSION to GlobalPlayer & Home
+      DeviceEventEmitter.emit('aiVideoScanChanged', scan);
+      DeviceEventEmitter.emit('aiBlurTargetChanged', target);
+
       setTimeout(() => { setIsLoading(false); setCurrentView('main'); }, 600);
   };
 
@@ -207,9 +216,12 @@ export default function SettingsScreen() {
           </View>
 
           <View style={styles.settingsContainer}>
-            {/* 🚨 [NEW] AI Settings Cards */}
-            <MainMenuCard icon="hardware-chip" iconBg="#5c1a4b" title={__translate('AI Video Scanning')} subtitle={aiVideoScan === 'true' ? 'Enabled' : 'Disabled (Master)'} onPress={() => setCurrentView('aiVideo')} />
-            <MainMenuCard icon="scan-circle" iconBg="#5c381a" title={__translate('AI Thumbnail Scanning')} subtitle={aiThumbSettings.startsWith('false') ? 'Disabled' : (aiThumbSettings.endsWith('w') ? 'Scan & Blur Woman' : 'Scan & Blur Man')} onPress={() => setCurrentView('aiThumb')} />
+            {/* 🚨 [NEW] AI Video Scanning & Blur Target in One Menu */}
+            <MainMenuCard 
+                icon="hardware-chip" iconBg="#5c1a4b" title={__translate('AI Video Scanning')} 
+                subtitle={aiVideoSetting === 'false' ? 'Disabled' : (aiVideoSetting.endsWith('w') ? 'Scan & Blur Woman' : 'Scan & Blur Man')} 
+                onPress={() => setCurrentView('aiVideo')} 
+            />
             <MainMenuCard icon="image" iconBg="#1a5c54" title={__translate('Thumbnail Quality')} subtitle={thumbQuality} onPress={() => setCurrentView('thumbQuality')} />
             
             <View style={styles.optionDivider} />
@@ -231,25 +243,12 @@ export default function SettingsScreen() {
             <View style={styles.optionsWrapper}>
               {aiVideoOptions.map((opt, index) => (
                 <View key={index}>
-                  <OptionItem label={opt.label} desc={opt.desc} badge={opt.value==='true'?'ON':'OFF'} badgeType="ai" selected={aiVideoScan === opt.value} onPress={() => handleSelect(setAiVideoScan, 'aiVideoScan', 'ai_video_scan_master', opt.value)} />
+                  <OptionItem 
+                      label={opt.label} desc={opt.desc} badge={opt.value==='false'?'OFF':'ON'} badgeType="ai" 
+                      selected={aiVideoSetting === opt.value} 
+                      onPress={() => handleAiVideoSelect(opt.value)} 
+                  />
                   {index < aiVideoOptions.length - 1 && <View style={styles.optionDivider} />}
-                </View>
-              ))}
-            </View>
-          </ScrollView>
-        </View>
-      )}
-
-      {/* 🚨 [NEW] AI Thumbnail Scanning Sub-Screen */}
-      {currentView === 'aiThumb' && (
-        <View style={{ flex: 1 }}>
-          <SubScreenHeader title={__translate('AI Thumbnail Scanning')} />
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.subListContent}>
-            <View style={styles.optionsWrapper}>
-              {aiThumbOptions.map((opt, index) => (
-                <View key={index}>
-                  <OptionItem label={opt.label} desc={opt.desc} badge="AI" badgeType="ai" selected={aiThumbSettings === opt.value} onPress={() => handleAiThumbSelect(opt.value)} />
-                  {index < aiThumbOptions.length - 1 && <View style={styles.optionDivider} />}
                 </View>
               ))}
             </View>
@@ -274,7 +273,7 @@ export default function SettingsScreen() {
         </View>
       )}
 
-      {/* Other Existing Views Below... */}
+      {/* Other Views... */}
       {currentView === 'longVideo' && (
         <View style={{ flex: 1 }}>
           <SubScreenHeader title={__translate('Long Video Quality')} />
