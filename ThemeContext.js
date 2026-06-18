@@ -51,7 +51,7 @@ export const ThemeProvider = ({ children }) => {
   }, [systemColorScheme]);
 
   // থিম টগল (লাইট থেকে ডার্ক বা ডার্ক থেকে লাইট) করার ফাংশন
-  const toggleTheme = async () => {
+  const toggleDarkMode = async () => {
     try {
       const newMode = !isDarkMode;
       setIsDarkMode(newMode);
@@ -65,7 +65,7 @@ export const ThemeProvider = ({ children }) => {
   const colors = isDarkMode ? themeColors.dark : themeColors.light;
 
   return (
-    <ThemeContext.Provider value={{ isDarkMode, toggleTheme, colors }}>
+    <ThemeContext.Provider value={{ isDarkMode, toggleDarkMode, colors }}>
       {children}
     </ThemeContext.Provider>
   );
