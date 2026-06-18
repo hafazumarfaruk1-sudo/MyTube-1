@@ -21,7 +21,7 @@ import { loadTensorflowModel } from 'react-native-fast-tflite';
 
 LogBox.ignoreLogs(['Video component', 'expo-audio', 'expo-video']);
 
-// 🚨 FIX: ফাইলটি একদম উপরে গ্লোবালি রিকোয়ার করা হলো! যাতে অ্যাপ চালুর সাথে সাথেই মেট্রো এটি চিনে নেয়।
+// 🚨 মডেলটি গ্লোবালি রিকোয়ার করা হলো যাতে মেট্রো অ্যাপ চালুর সাথে সাথেই চিনে নেয়
 const GENDER_MODEL_ASSET = require('../assets/gender_classification.tflite');
 
 const windowDim = Dimensions.get('window');
@@ -199,7 +199,7 @@ export default function GlobalPlayer() {
     const appStateSub = AppState.addEventListener('change', async (nextAppState) => {
         if (nextAppState.match(/inactive|background/)) {
             if (!isAudioModeRef.current) {
-                // Background video pause logic
+                // Background video pause is removed for continuous background audio
             }
         }
     });
@@ -488,7 +488,6 @@ export default function GlobalPlayer() {
   const loadGenderModelAsync = async () => {
       if (!genderModelRef.current) {
           try {
-              // 🚨 FIX: গ্লোবাল ভ্যারিয়েবল থেকে মডেল লোড করা হচ্ছে!
               const asset = Asset.fromModule(GENDER_MODEL_ASSET);
               await asset.downloadAsync();
               genderModelRef.current = await loadTensorflowModel({ url: asset.localUri || asset.uri }, []);
@@ -499,6 +498,7 @@ export default function GlobalPlayer() {
       }
   };
 
+  // 🚨 FIX: স্কয়ার ক্রপিং এবং প্যাডিং (জুমিং) যুক্ত করে আপডেট করা হলো
   const processFrameForGender = async (uri) => {
       try {
           console.log(`\n[AI Debug] --------- Analyzing New Frame ---------`);
@@ -514,12 +514,29 @@ export default function GlobalPlayer() {
                   const box = face.frame || face.bounds || {}; 
                   console.log(`[AI Debug] Processing Face ${i + 1}...`);
                   
-                  let padding = 20; 
-                  let originX = Math.floor(Math.max(0, (box.left ?? box.x ?? box.originX ?? 0) - padding / 2));
-                  let originY = Math.floor(Math.max(0, (box.top ?? box.y ?? box.originY ?? 0) - padding));
-                  let width = Math.floor(Math.max(10, (box.width ?? 0) + padding));
-                  let height = Math.floor(Math.max(10, (box.height ?? 0) + padding * 1.5)); 
+                  const boxLeft = box.left ?? box.x ?? box.originX ?? 0;
+                  const boxTop = box.top ?? box.y ?? box.originY ?? 0;
+                  const boxWidth = box.width ?? 0;
+                  const boxHeight = box.height ?? 0;
+
+                  // ১. মুখের কেন্দ্রবিন্দু বের করা
+                  const centerX = boxLeft + (boxWidth / 2);
+                  const centerY = boxTop + (boxHeight / 2);
+
+                  // ২. চুল, কান এবং চিবুক আনার জন্য বক্সটিকে ৪০% (1.4x) বড় করে স্কয়ার বানানো
+                  const size = Math.floor(Math.max(boxWidth, boxHeight) * 1.4); 
+
+                  // ৩. নতুন X এবং Y পজিশন বের করা (যাতে ক্রপটি ঠিক মাঝখানে থাকে)
+                  let originX = Math.floor(centerX - (size / 2));
+                  let originY = Math.floor(centerY - (size / 2));
+
+                  // ৪. নেগেটিভ ভ্যালু থেকে বাঁচাতে সেফটি চেক
+                  originX = Math.max(0, originX);
+                  originY = Math.max(0, originY);
+                  let width = size;
+                  let height = size;
                   
+                  // স্কয়ার ক্রপ করে তারপর 224x224 এ রিসাইজ করা (এতে মুখ আর চ্যাপ্টা হবে না)
                   const croppedFace = await ImageManipulator.manipulateAsync(
                       uri, 
                       [
