@@ -15,7 +15,6 @@ export default function SearchSettingScreen({ route }) {
   const inputRef = useRef(null);
   const { isDarkMode } = useTheme();
   const { t } = useLanguage();
-  const __translate = t; 
   const styles = getDynamicStyles(isDarkMode);
 
   const [query, setQuery] = useState('');
@@ -315,7 +314,7 @@ export default function SearchSettingScreen({ route }) {
         <View style={styles.shortsShelf}>
           <View style={styles.shelfHeader}>
             <Ionicons name="play-circle" size={22} color="#FF0000" />
-            <Text style={styles.shelfTitle}>{__translate('Shorts')}</Text>
+            <Text style={styles.shelfTitle}>{t('Shorts')}</Text>
           </View>
           <FlatList 
             horizontal showsHorizontalScrollIndicator={false} data={item.shorts} 
@@ -358,7 +357,7 @@ export default function SearchSettingScreen({ route }) {
             >
                 <Ionicons name="hardware-chip-outline" size={16} color={isScanOn ? '#00BFA5' : (isDarkMode ? '#888' : '#999')} />
                 <Text style={{ fontSize: 9, color: isScanOn ? '#00BFA5' : (isDarkMode ? '#888' : '#999'), marginTop: 2, fontWeight: 'bold' }}>
-                    {isScanOn ? 'SCAN ON' : 'SCAN OFF'}
+                    {isScanOn ? t('SCAN ON') : t('SCAN OFF')}
                 </Text>
             </TouchableOpacity>
           </View>
@@ -372,7 +371,7 @@ export default function SearchSettingScreen({ route }) {
           <Image source={{ uri: item.avatar }} style={styles.channelBigAvatar} />
           <View style={{ flex: 1, marginLeft: 15 }}>
             <Text style={styles.channelTitleMain}>{item.title}</Text>
-            <Text style={styles.channelMetaMain}>{item.subscribers} • Channel</Text>
+            <Text style={styles.channelMetaMain}>{item.subscribers} • {t('Channel')}</Text>
           </View>
         </TouchableOpacity>
       );
@@ -390,12 +389,12 @@ export default function SearchSettingScreen({ route }) {
 
         <View style={styles.logoBox}>
           <Ionicons name="logo-youtube" size={22} color="#FF0000" />
-          <Text style={styles.logoText}>{__translate('MyTube')}</Text>
+          <Text style={styles.logoText}>{t('MyTube')}</Text>
         </View>
 
         <View style={styles.searchBar}>
           <TextInput 
-            ref={inputRef} style={styles.input} placeholder={__translate('Search...')} 
+            ref={inputRef} style={styles.input} placeholder={t('Search...')} 
             placeholderTextColor={isDarkMode ? '#888' : '#666'} value={query} 
             onChangeText={handleTextChange} onSubmitEditing={() => handleSearchSubmit(query)} 
             onTouchStart={() => { if (showResults) setShowResults(false); }} autoCorrect={false} autoCapitalize="none"

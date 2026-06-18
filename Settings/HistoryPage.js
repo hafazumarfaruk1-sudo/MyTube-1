@@ -92,7 +92,7 @@ export default function HistoryPage() {
       ) : historyData.length === 0 ? (
         <View style={styles.centerContent}>
           <Ionicons name="time-outline" size={64} color="#333" />
-          <Text style={styles.emptyText}>{__translate('You have no watch history yet.')}</Text>
+          <Text style={styles.emptyText}>{t('You have no watch history yet.')}</Text>
         </View>
       ) : (
         <FlatList

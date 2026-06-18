@@ -40,7 +40,6 @@ export default function SettingsScreen() {
 
   const { isDarkMode } = useTheme();
   const { t } = useLanguage();
-  const __translate = t; 
   const styles = getDynamicStyles(isDarkMode);
 
   useEffect(() => {
@@ -163,8 +162,8 @@ export default function SettingsScreen() {
         <Ionicons name={icon} size={20} color={isDarkMode ? '#FFF' : '#111'} />
       </View>
       <View style={{ flex: 1, marginLeft: 12 }}>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        <Text style={styles.sectionSubtitle}>{subtitle}</Text>
+        <Text style={styles.sectionTitle}>{typeof title === 'string' ? t(title) : title}</Text>
+        <Text style={styles.sectionSubtitle}>{typeof subtitle === 'string' ? t(subtitle) : subtitle}</Text>
       </View>
       <Ionicons name="chevron-forward" size={20} color={isDarkMode ? '#7b8db0' : '#556'} />
     </TouchableOpacity>
@@ -183,10 +182,10 @@ export default function SettingsScreen() {
           )}
           <View style={{ marginLeft: 12 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={[styles.optionLabel, selected && styles.optionLabelSelected]}>{label}</Text>
-              {label.includes('Default') && <Text style={styles.tagDefault}>{__translate('Default')}</Text>}
+              <Text style={[styles.optionLabel, selected && styles.optionLabelSelected]}>{typeof label === 'string' ? t(label) : label}</Text>
+              {typeof label === 'string' && label.includes('Default') && <Text style={styles.tagDefault}>{t('Default')}</Text>}
             </View>
-            {!!desc && <Text style={styles.optionDesc}>{desc}</Text>}
+            {!!desc && <Text style={styles.optionDesc}>{typeof desc === 'string' ? t(desc) : desc}</Text>}
           </View>
         </View>
         <View style={[styles.radioOuter, selected && styles.radioOuterSelected]}>
@@ -201,7 +200,7 @@ export default function SettingsScreen() {
       <TouchableOpacity style={styles.backButton} onPress={() => setCurrentView('main')}>
         <Ionicons name="arrow-back" size={24} color={isDarkMode ? '#e8edf8' : '#111'} />
       </TouchableOpacity>
-      <Text style={styles.subScreenTitle}>{title}</Text>
+      <Text style={styles.subScreenTitle}>{typeof title === 'string' ? t(title) : title}</Text>
       <View style={{ width: 40 }} />
     </View>
   );
@@ -218,27 +217,27 @@ export default function SettingsScreen() {
           <View style={styles.settingsContainer}>
             {/* 🚨 [NEW] AI Video Scanning & Blur Target in One Menu */}
             <MainMenuCard 
-                icon="hardware-chip" iconBg="#5c1a4b" title={__translate('AI Video Scanning')} 
+                icon="hardware-chip" iconBg="#5c1a4b" title={'AI Video Scanning'} 
                 subtitle={aiVideoSetting === 'false' ? 'Disabled' : (aiVideoSetting.endsWith('w') ? 'Scan & Blur Woman' : 'Scan & Blur Man')} 
                 onPress={() => setCurrentView('aiVideo')} 
             />
-            <MainMenuCard icon="image" iconBg="#1a5c54" title={__translate('Thumbnail Quality')} subtitle={thumbQuality} onPress={() => setCurrentView('thumbQuality')} />
+            <MainMenuCard icon="image" iconBg="#1a5c54" title={'Thumbnail Quality'} subtitle={thumbQuality} onPress={() => setCurrentView('thumbQuality')} />
             
             <View style={styles.optionDivider} />
 
-            <MainMenuCard icon="tv-outline" iconBg="#1a3a6e" title={__translate('Long Video Quality')} subtitle={selectedMainQuality} onPress={() => setCurrentView('longVideo')} />
-            <MainMenuCard icon="phone-portrait-outline" iconBg="#2d1a5c" title={__translate('Shorts Video Quality')} subtitle={selectedShortQuality} onPress={() => setCurrentView('shortVideo')} />
-            <MainMenuCard icon="folder-open-outline" iconBg="#0d3d28" title={__translate('Download Location')} subtitle={selectedLocation.split('/').pop() || 'MyTube'} onPress={() => setCurrentView('location')} />
-            <MainMenuCard icon="time-outline" iconBg="#3d2200" title={__translate('Shorts Cache Limit')} subtitle={__translate('ক্যাশ সময়সীমা নির্ধারণ করুন')} onPress={() => setCurrentView('cacheLimit')} />
+            <MainMenuCard icon="tv-outline" iconBg="#1a3a6e" title={'Long Video Quality'} subtitle={selectedMainQuality} onPress={() => setCurrentView('longVideo')} />
+            <MainMenuCard icon="phone-portrait-outline" iconBg="#2d1a5c" title={'Shorts Video Quality'} subtitle={selectedShortQuality} onPress={() => setCurrentView('shortVideo')} />
+            <MainMenuCard icon="folder-open-outline" iconBg="#0d3d28" title={'Download Location'} subtitle={selectedLocation.split('/').pop() || 'MyTube'} onPress={() => setCurrentView('location')} />
+            <MainMenuCard icon="time-outline" iconBg="#3d2200" title={'Shorts Cache Limit'} subtitle={'ক্যাশ সময়সীমা নির্ধারণ করুন'} onPress={() => setCurrentView('cacheLimit')} />
           </View>
-          <Text style={styles.bottomNote}>{__translate('সেটিংস স্বয়ংক্রিয়ভাবে সংরক্ষিত হয়')}</Text>
+          <Text style={styles.bottomNote}>{t('সেটিংস স্বয়ংক্রিয়ভাবে সংরক্ষিত হয়')}</Text>
         </ScrollView>
       )}
 
       {/* 🚨 [NEW] AI Video Scanning Sub-Screen */}
       {currentView === 'aiVideo' && (
         <View style={{ flex: 1 }}>
-          <SubScreenHeader title={__translate('AI Video Scanning')} />
+          <SubScreenHeader title={'AI Video Scanning'} />
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.subListContent}>
             <View style={styles.optionsWrapper}>
               {aiVideoOptions.map((opt, index) => (
@@ -259,7 +258,7 @@ export default function SettingsScreen() {
       {/* 🚨 [NEW] Thumbnail Quality Sub-Screen */}
       {currentView === 'thumbQuality' && (
         <View style={{ flex: 1 }}>
-          <SubScreenHeader title={__translate('Thumbnail Quality')} />
+          <SubScreenHeader title={'Thumbnail Quality'} />
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.subListContent}>
             <View style={styles.optionsWrapper}>
               {thumbQualityOptions.map((opt, index) => (
@@ -276,7 +275,7 @@ export default function SettingsScreen() {
       {/* Other Views... */}
       {currentView === 'longVideo' && (
         <View style={{ flex: 1 }}>
-          <SubScreenHeader title={__translate('Long Video Quality')} />
+          <SubScreenHeader title={'Long Video Quality'} />
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.subListContent}>
             <View style={styles.optionsWrapper}>
               {longVideoOptions.map((opt, index) => (
@@ -292,7 +291,7 @@ export default function SettingsScreen() {
 
       {currentView === 'shortVideo' && (
         <View style={{ flex: 1 }}>
-          <SubScreenHeader title={__translate('Shorts Video Quality')} />
+          <SubScreenHeader title={'Shorts Video Quality'} />
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.subListContent}>
             <View style={styles.optionsWrapper}>
               {shortVideoOptions.map((opt, index) => (
@@ -308,7 +307,7 @@ export default function SettingsScreen() {
 
       {currentView === 'cacheLimit' && (
         <View style={{ flex: 1 }}>
-          <SubScreenHeader title={__translate('Cache Limit Time')} />
+          <SubScreenHeader title={'Cache Limit Time'} />
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.subListContent}>
             <View style={styles.optionsWrapper}>
               {cacheLimitOptions.map((opt, index) => (
@@ -324,7 +323,7 @@ export default function SettingsScreen() {
 
       {currentView === 'location' && (
         <View style={{ flex: 1 }}>
-          <SubScreenHeader title={__translate('Download Location')} />
+          <SubScreenHeader title={'Download Location'} />
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.subListContent}>
             <View style={styles.optionsWrapper}>
               {downloadLocations.map((loc, index) => (
@@ -342,7 +341,7 @@ export default function SettingsScreen() {
         <View style={styles.loadingOverlay}>
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color="#3d8bff" />
-            <Text style={styles.loadingText}>{__translate('Applying Settings...')}</Text>
+            <Text style={styles.loadingText}>{t('Applying Settings...')}</Text>
           </View>
         </View>
       )}
