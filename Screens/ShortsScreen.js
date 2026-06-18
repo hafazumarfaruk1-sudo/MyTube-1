@@ -272,7 +272,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
       <View style={styles.header}>
         <View style={styles.logoContainer}>
            <Ionicons name="logo-youtube" size={28} color="#FF0000" />
-           <Text style={styles.logoText}>{__translate('MyTube')}</Text>
+           <Text style={styles.logoText}>{t('MyTube')}</Text>
         </View>
         <TouchableOpacity style={styles.searchBar} activeOpacity={0.8} onPress={() => navigation.navigate('searchsettings')}>
           <Text style={{ flex: 1, color: isDarkMode ? '#888' : '#666', fontSize: 14 }}>{t('search') || 'সার্চ...'}</Text>
@@ -314,7 +314,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
 
             <TouchableOpacity style={styles.nativeShareBtn} onPress={handleShare} activeOpacity={0.8}>
               <Ionicons name="arrow-redo-outline" size={18} color={isDarkMode ? '#FFF' : '#111'} />
-              <Text style={styles.nativeShareText}>{__translate('Share')}</Text>
+              <Text style={styles.nativeShareText}>{t('Share')}</Text>
             </TouchableOpacity>
         </View>
       )}
@@ -322,7 +322,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
       {isAutoSkipping && (
         <View style={styles.skipOverlay}>
           <ActivityIndicator size="large" color="#FF0000" />
-          <Text style={styles.skipText}>{__translate('অ্যাড ফিল্টার হচ্ছে...')}</Text>
+          <Text style={styles.skipText}>{t('অ্যাড ফিল্টার হচ্ছে...')}</Text>
         </View>
       )}
 

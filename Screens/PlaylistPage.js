@@ -51,10 +51,10 @@ export default function PlaylistPage({ navigation }) {
       <View style={styles.header}>
         <View style={styles.logoContainer}>
            <Ionicons name="logo-youtube" size={28} color="#FF0000" />
-           <Text style={styles.logoText}>{__translate('MyTube')}</Text>
+           <Text style={styles.logoText}>{t('MyTube')}</Text>
         </View>
         <TouchableOpacity style={styles.searchBar} activeOpacity={0.8} onPress={() => navigation.navigate('searchsettings')}>
-          <Text style={styles.searchPlaceholder}>{__translate('সার্চ...')}</Text>
+          <Text style={styles.searchPlaceholder}>{t('সার্চ...')}</Text>
           <Ionicons name="search" size={18} color={isDarkMode ? '#AAA' : '#555'} />
         </TouchableOpacity>
       </View>
@@ -64,7 +64,7 @@ export default function PlaylistPage({ navigation }) {
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color="#FFF" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{__translate('My Saved Playlist')}</Text>
+        <Text style={styles.headerTitle}>{t('My Saved Playlist')}</Text>
         <Text style={styles.videoCount}>{savedPlaylist.length} Videos</Text>
       </View>
 
@@ -95,8 +95,8 @@ export default function PlaylistPage({ navigation }) {
         ListEmptyComponent={() => (
             <View style={styles.emptyContainer}>
                 <Ionicons name="folder-open-outline" size={70} color="#333" />
-                <Text style={styles.emptyTitle}>{__translate('প্লেলিস্ট একদম ফাঁকা!')}</Text>
-                <Text style={styles.emptySubtitle}>{__translate('ভিডিও চলাকালীন সেটিংস থেকে "Save to Playlist" এ ক্লিক করে ভিডিও সেভ করুন।')}</Text>
+                <Text style={styles.emptyTitle}>{t('প্লেলিস্ট একদম ফাঁকা!')}</Text>
+                <Text style={styles.emptySubtitle}>{t('ভিডিও চলাকালীন সেটিংস থেকে "Save to Playlist" এ ক্লিক করে ভিডিও সেভ করুন।')}</Text>
             </View>
         )}
       />
