@@ -15,7 +15,6 @@ const PLAYER_HEIGHT = (width * 9) / 16;
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
 
 export default function PlayerScreen({ route, navigation }) {
-  // 🚨 AI Scan Enabled রিসিভ করা হলো
   const { videoId, videoData = {}, aiScanEnabled } = route?.params || {};
   
   const { isDarkMode } = useTheme();
@@ -54,7 +53,6 @@ export default function PlayerScreen({ route, navigation }) {
   useEffect(() => {
     checkSubscriptionStatus(); fetchRelatedVideos(false);
     if (videoId && videoData) {
-        // 🚨 GlobalPlayer-এ aiScanEnabled পাঠানো হলো
         DeviceEventEmitter.emit('playVideo', { videoId: videoId, videoData: videoData, aiScanEnabled: aiScanEnabled });
         
         setIsAudioMode(videoData?.type === 'audio'); setIsInitialLoading(true);
@@ -107,7 +105,6 @@ export default function PlayerScreen({ route, navigation }) {
               const response = await fetch(`${MY_API_SERVER}/api/resolve-url?url=${encodeURIComponent(cleanUrl)}`);
               const data = await response.json();
               setIsLinkLoading(false);
-              // 🚨 লিংকে ক্লিক করার সময় স্ক্যানিং অন/অফ পাঠানো হচ্ছে
               if (data.success && data.videoData) navigation.push('Player', { videoId: data.videoData.id, videoData: data.videoData, aiScanEnabled: aiScanEnabled });
               else navigation.navigate('searchsettings', { initialSearch: videoIdMatch[1] });
           } catch (e) {
@@ -189,7 +186,6 @@ export default function PlayerScreen({ route, navigation }) {
       setShowCommentModal(false); navigation.navigate('Channel', { channelName, channelAvatar, channelId });
   };
 
-  // 🎯 গ্লোবাল ডাউনলোড ট্রিগার
   const openDownloadWindow = () => { 
       DeviceEventEmitter.emit('triggerDownloadOverlay', { videoId: videoId, title: videoData?.title, thumbnail: videoData?.thumbnail }); 
   };
@@ -328,7 +324,6 @@ export default function PlayerScreen({ route, navigation }) {
           <FlatList 
             ListHeaderComponent={renderHeader} data={relatedVideos} keyExtractor={(item, index) => item.id + index.toString()} 
             renderItem={({item}) => (
-              // 🚨 ৩. রিলেটেড ভিডিওতে ক্লিক করার সময় aiScanEnabled পাঠানো হলো
               <TouchableOpacity style={styles.recCard} onPress={() => navigation.push('Player', { videoId: item.id, videoData: item, aiScanEnabled: aiScanEnabled })}>
                 <View style={styles.thumbWrapper}>
                    <Image source={{ uri: item.thumbnail }} style={styles.recThumb} />
