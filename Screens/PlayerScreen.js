@@ -189,7 +189,6 @@ export default function PlayerScreen({ route, navigation }) {
 
   const openDownloadWindow = () => { DeviceEventEmitter.emit('triggerDownloadOverlay', { videoId: videoId, title: videoData?.title, thumbnail: videoData?.thumbnail }); };
 
-=======
   const openDownloadWindow = () => { DeviceEventEmitter.emit('triggerDownloadOverlay', { videoId: videoId, title: videoData?.title, thumbnail: videoData?.thumbnail }); };
 
 >>>>>>> b10729fc5330650efa3c192215a70c989abfe763
