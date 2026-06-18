@@ -15,7 +15,7 @@ const PLAYER_HEIGHT = (width * 9) / 16;
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
 
 export default function PlayerScreen({ route, navigation }) {
-  // 🚨 ১. পরিবর্তন: aiScanEnabled রিসিভ করা হলো
+  // 🚨 AI Scan Enabled রিসিভ করা হলো
   const { videoId, videoData = {}, aiScanEnabled } = route?.params || {};
   
   const { isDarkMode } = useTheme();
@@ -54,7 +54,7 @@ export default function PlayerScreen({ route, navigation }) {
   useEffect(() => {
     checkSubscriptionStatus(); fetchRelatedVideos(false);
     if (videoId && videoData) {
-        // 🚨 ২. পরিবর্তন: GlobalPlayer-এ aiScanEnabled পাঠানো হলো
+        // 🚨 GlobalPlayer-এ aiScanEnabled পাঠানো হলো
         DeviceEventEmitter.emit('playVideo', { videoId: videoId, videoData: videoData, aiScanEnabled: aiScanEnabled });
         
         setIsAudioMode(videoData?.type === 'audio'); setIsInitialLoading(true);
@@ -127,7 +127,7 @@ export default function PlayerScreen({ route, navigation }) {
   const handleLinkLongPress = async (url) => {
       const cleanUrl = url.replace(/\s/g, '');
       await Clipboard.setStringAsync(cleanUrl);
-      Alert.alert("Success", "Link copied to clipboard!");
+      Alert.alert(t('Success'), t('Link copied to clipboard!'));
   };
 
   const renderDescriptionWithLinks = (text) => {
@@ -189,8 +189,10 @@ export default function PlayerScreen({ route, navigation }) {
       setShowCommentModal(false); navigation.navigate('Channel', { channelName, channelAvatar, channelId });
   };
 
-  const openDownloadWindow = () => { DeviceEventEmitter.emit('triggerDownloadOverlay', { videoId: videoId, title: videoData?.title, thumbnail: videoData?.thumbnail }); };
-
+  // 🎯 গ্লোবাল ডাউনলোড ট্রিগার
+  const openDownloadWindow = () => { 
+      DeviceEventEmitter.emit('triggerDownloadOverlay', { videoId: videoId, title: videoData?.title, thumbnail: videoData?.thumbnail }); 
+  };
 
   const fetchRelatedVideos = async (isLoadMore = false) => {
     if (isLoadMore) setIsLoadingMore(true);
@@ -231,7 +233,6 @@ export default function PlayerScreen({ route, navigation }) {
     } catch (e) {} finally { setIsLoadingMore(false); }
   };
 
-
   const displayAvatar = liveAvatar || (videoData?.avatar && videoData.avatar.trim() !== '' ? (videoData.avatar.startsWith('//') ? `https:${videoData.avatar}` : videoData.avatar) : null) || `https://ui-avatars.com/api/?name=${encodeURIComponent(videoData?.channel || 'YT')}&background=random&color=fff&size=100`;
 
   const renderHeader = () => (
@@ -240,7 +241,7 @@ export default function PlayerScreen({ route, navigation }) {
       <Text style={styles.mainViews}>{videoData?.views} {videoData?.publishedTime ? `• ${videoData.publishedTime}` : ''}</Text>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actionRowContainer}>
-              <TouchableOpacity style={styles.actionPill} onPress={loadDescription}>
+          <TouchableOpacity style={styles.actionPill} onPress={loadDescription}>
               <Ionicons name="document-text-outline" size={18} color={isDarkMode ? '#FFF' : '#111'} />
               <Text style={styles.actionPillText}>{t('Description')}</Text>
           </TouchableOpacity>
@@ -275,7 +276,7 @@ export default function PlayerScreen({ route, navigation }) {
         </TouchableOpacity>
         {!videoData.localUri && (
           <TouchableOpacity style={[styles.subscribeBtn, isSubscribed && styles.subscribedBtn]} onPress={toggleSubscription}>
-            <Text style={[styles.subscribeText, isSubscribed && styles.subscribedText]}>{isSubscribed ? 'Subscribed' : 'Subscribe'}</Text>
+            <Text style={[styles.subscribeText, isSubscribed && styles.subscribedText]}>{isSubscribed ? t('Subscribed') : t('Subscribe')}</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -327,7 +328,7 @@ export default function PlayerScreen({ route, navigation }) {
           <FlatList 
             ListHeaderComponent={renderHeader} data={relatedVideos} keyExtractor={(item, index) => item.id + index.toString()} 
             renderItem={({item}) => (
-              // 🚨 ৩. পরিবর্তন: রিলেটেড ভিডিওতে ক্লিক করার সময় aiScanEnabled পাঠানো হলো
+              // 🚨 ৩. রিলেটেড ভিডিওতে ক্লিক করার সময় aiScanEnabled পাঠানো হলো
               <TouchableOpacity style={styles.recCard} onPress={() => navigation.push('Player', { videoId: item.id, videoData: item, aiScanEnabled: aiScanEnabled })}>
                 <View style={styles.thumbWrapper}>
                    <Image source={{ uri: item.thumbnail }} style={styles.recThumb} />
@@ -499,27 +500,6 @@ const getDynamicStyles = (isDark) => StyleSheet.create({
     replyText: { color: isDark ? '#DDD' : '#333', fontSize: 13, lineHeight: 18, marginTop: 1 },
     commentPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 30 },
     commentPlaceholderText: { color: isDark ? '#AAA' : '#666', fontSize: 16, marginTop: 15 },
-    modalOverlay: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'flex-end' },
-    modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
-    modalContent: { width: '50%', backgroundColor: isDark ? '#1E1E1E' : '#FFFFFF', paddingHorizontal: 12, paddingTop: 10, maxHeight: height * 0.75, minHeight: 350, zIndex: 10 },
-    modalDragIndicator: { width: 35, height: 4, backgroundColor: isDark ? '#444' : '#999', borderRadius: 2, alignSelf: 'center', marginBottom: 15 },
-    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
-    modalTitle: { color: isDark ? '#FFF' : '#111', fontSize: 18, fontWeight: 'bold' },
-    modalCloseBtn: { padding: 6, backgroundColor: isDark ? '#2A2A2A' : '#f0f0f0', borderRadius: 15, marginLeft: 5 },
-    tabContainer: { flexDirection: 'row', backgroundColor: isDark ? '#111' : '#F0F0F0', borderRadius: 10, padding: 3, marginBottom: 15 },
-    tabButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 8 },
-    activeTabButton: { backgroundColor: isDark ? '#2A2A2A' : '#e6e6e6' },
-    tabText: { color: isDark ? '#888' : '#666', fontSize: 12, fontWeight: 'bold', marginLeft: 6 }, 
-    activeTabText: { color: isDark ? '#FFF' : '#111' },
-    loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-    loadingText: { color: isDark ? '#AAA' : '#666', marginTop: 12, fontSize: 13 },
-    qualityListContainer: { paddingBottom: 10 },
-    qualityCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: isDark ? '#282828' : '#FFFFFF', padding: 10, borderRadius: 12, marginBottom: 10 },
-    qualityInfoLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-    qualityIconBg: { backgroundColor: 'rgba(0, 191, 165, 0.1)', padding: 8, borderRadius: 10 },
-    qualityText: { color: isDark ? '#FFF' : '#111', fontSize: 14, fontWeight: 'bold' }, 
-    qualitySubText: { color: isDark ? '#888' : '#666', fontSize: 10, marginTop: 2 }, 
-    downloadIconBtn: { padding: 5 },
     linkLoadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', zIndex: 999 },
     linkLoadingText: { color: '#00BFA5', fontSize: 14, fontWeight: 'bold', marginTop: 10 }
 });
