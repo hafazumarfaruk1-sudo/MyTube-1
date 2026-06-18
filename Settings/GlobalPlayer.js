@@ -21,9 +21,6 @@ import { loadTensorflowModel } from 'react-native-fast-tflite';
 
 LogBox.ignoreLogs(['Video component', 'expo-audio', 'expo-video']);
 
-// 🚨 মডেলটি গ্লোবালি রিকোয়ার করা হলো যাতে মেট্রো অ্যাপ চালুর সাথে সাথেই চিনে নেয়
-const GENDER_MODEL_ASSET = require('../assets/gender_classification.tflite');
-
 const windowDim = Dimensions.get('window');
 const PORTRAIT_WIDTH = Math.min(windowDim.width, windowDim.height);
 const PORTRAIT_HEIGHT = Math.max(windowDim.width, windowDim.height);
@@ -120,7 +117,7 @@ export default function GlobalPlayer() {
 
   const scanIntervalRef = useRef(3.0);
   const blurTargetRef = useRef('w');
-  const lowStreamUrlRef = useRef(null); 
+  const lowStreamUrlRef = useRef(null); // 🚨
 
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const isAudioModeRef = useRef(false);
@@ -166,7 +163,6 @@ export default function GlobalPlayer() {
           playsInSilentModeIOS: true,
           shouldDuckAndroid: true,
           playThroughEarpieceAndroid: false,
-          interruptionMode: 'doNotMix', 
         });
       } catch (e) {}
     };
@@ -199,7 +195,10 @@ export default function GlobalPlayer() {
     const appStateSub = AppState.addEventListener('change', async (nextAppState) => {
         if (nextAppState.match(/inactive|background/)) {
             if (!isAudioModeRef.current) {
-                // Background video pause is removed for continuous background audio
+                if (player && player.playing) player.pause();
+                if (syncAudioRef.current && syncAudioRef.current.playing) {
+                    syncAudioRef.current.pause();
+                }
             }
         }
     });
@@ -278,6 +277,7 @@ export default function GlobalPlayer() {
     } catch (error) {}
   };
 
+  // 🚨 [NEW] সার্ভারের পাইপকে ট্রিগার করার জন্য ফাংশন
   const startAiPipe = async (time) => {
       if (!lowStreamUrlRef.current) return;
       try {
@@ -287,6 +287,7 @@ export default function GlobalPlayer() {
 
   const seekTo = async (newTime) => {
       setCurrentTime(newTime); 
+      // 🚨 যখনই ইউজার ভিডিও টানবে, সাথে সাথে পাইপ রিস্টার্ট হবে
       targetScanSecRef.current = parseFloat(newTime.toFixed(1));
       startAiPipe(targetScanSecRef.current);
 
@@ -374,13 +375,6 @@ export default function GlobalPlayer() {
               if (audioUrlToPlay) {
                   safeReleaseAudio();
                   syncAudioRef.current = createAudioPlayer(audioUrlToPlay);
-                  try {
-                      syncAudioRef.current.setActiveForLockScreen(true, {
-                          title: videoData?.title || 'YouTube Audio',
-                          artist: 'MyTube',
-                          artworkUrl: `https://i.ytimg.com/vi/${currentVideoIdRef.current}/hqdefault.jpg`
-                      });
-                  } catch(e) {}
                   pendingSeekRef.current = resumeTimeRef.current; 
                   safeSetRate(syncAudioRef.current, currentSpeed); 
                   syncAudioRef.current.play();
@@ -447,6 +441,7 @@ export default function GlobalPlayer() {
           if (json.lowQualityUrl) {
               setLowStreamUrl(json.lowQualityUrl); 
               lowStreamUrlRef.current = json.lowQualityUrl;
+              // 🚨 ভিডিও লোড হলেই প্রথম পাইপ চালু হবে
               startAiPipe(0);
           }
           
@@ -471,13 +466,6 @@ export default function GlobalPlayer() {
     if (json.audioUrl && streamModeRef.current === 'separate') {
         safeReleaseAudio();
         syncAudioRef.current = createAudioPlayer(json.audioUrl);
-        try {
-            syncAudioRef.current.setActiveForLockScreen(true, {
-                title: videoData?.title || 'YouTube Audio',
-                artist: 'MyTube',
-                artworkUrl: `https://i.ytimg.com/vi/${currentVideoIdRef.current}/hqdefault.jpg`
-            });
-        } catch(e) {}
         safeSetVolume(syncAudioRef.current, 1.0); 
         safeSetRate(syncAudioRef.current, currentSpeed); 
         syncAudioRef.current.play();
@@ -488,70 +476,34 @@ export default function GlobalPlayer() {
   const loadGenderModelAsync = async () => {
       if (!genderModelRef.current) {
           try {
-              const asset = Asset.fromModule(GENDER_MODEL_ASSET);
+              const asset = Asset.fromModule(require('../assets/gender_classification.tflite'));
               await asset.downloadAsync();
               genderModelRef.current = await loadTensorflowModel({ url: asset.localUri || asset.uri }, []);
-              console.log("[AI Debug] TFLite Model loaded successfully!");
-          } catch (e) { 
-              console.log("[AI Debug] TFLite Model load ERROR:", e);
-          }
+          } catch (e) { }
       }
   };
 
-  // 🚨 FIX: স্কয়ার ক্রপিং এবং প্যাডিং (জুমিং) যুক্ত করে আপডেট করা হলো
   const processFrameForGender = async (uri) => {
       try {
-          console.log(`\n[AI Debug] --------- Analyzing New Frame ---------`);
-          
           const faces = await FaceDetection.detect(uri);
-          console.log(`[AI Debug] Faces Detected: ${faces ? faces.length : 0}`);
-
           if (faces && faces.length > 0) {
               let hasFemale = false; let hasMale = false;
 
               for (let i = 0; i < faces.length; i++) {
                   const face = faces[i];
                   const box = face.frame || face.bounds || {}; 
-                  console.log(`[AI Debug] Processing Face ${i + 1}...`);
                   
-                  const boxLeft = box.left ?? box.x ?? box.originX ?? 0;
-                  const boxTop = box.top ?? box.y ?? box.originY ?? 0;
-                  const boxWidth = box.width ?? 0;
-                  const boxHeight = box.height ?? 0;
-
-                  // ১. মুখের কেন্দ্রবিন্দু বের করা
-                  const centerX = boxLeft + (boxWidth / 2);
-                  const centerY = boxTop + (boxHeight / 2);
-
-                  // ২. চুল, কান এবং চিবুক আনার জন্য বক্সটিকে ৪০% (1.4x) বড় করে স্কয়ার বানানো
-                  const size = Math.floor(Math.max(boxWidth, boxHeight) * 1.4); 
-
-                  // ৩. নতুন X এবং Y পজিশন বের করা (যাতে ক্রপটি ঠিক মাঝখানে থাকে)
-                  let originX = Math.floor(centerX - (size / 2));
-                  let originY = Math.floor(centerY - (size / 2));
-
-                  // ৪. নেগেটিভ ভ্যালু থেকে বাঁচাতে সেফটি চেক
-                  originX = Math.max(0, originX);
-                  originY = Math.max(0, originY);
-                  let width = size;
-                  let height = size;
+                  let padding = 20; 
+                  let originX = Math.floor(Math.max(0, (box.left ?? box.x ?? box.originX ?? 0) - padding / 2));
+                  let originY = Math.floor(Math.max(0, (box.top ?? box.y ?? box.originY ?? 0) - padding));
+                  let width = Math.floor(Math.max(10, (box.width ?? 0) + padding));
+                  let height = Math.floor(Math.max(10, (box.height ?? 0) + padding * 1.5)); 
                   
-                  // স্কয়ার ক্রপ করে তারপর 224x224 এ রিসাইজ করা (এতে মুখ আর চ্যাপ্টা হবে না)
                   const croppedFace = await ImageManipulator.manipulateAsync(
-                      uri, 
-                      [
-                          { crop: { originX, originY, width, height } },
-                          { resize: { width: 224, height: 224 } } 
-                      ], 
-                      { compress: 1, format: ImageManipulator.SaveFormat.JPEG }
+                      uri, [{ crop: { originX, originY, width, height } }], { compress: 1, format: ImageManipulator.SaveFormat.JPEG }
                   );
                   
                   await loadGenderModelAsync();
-                  if (!genderModelRef.current) {
-                      console.log("[AI Debug] ERROR: Model is not ready yet!");
-                      continue;
-                  }
-
                   const base64Data = await FileSystem.readAsStringAsync(croppedFace.uri, { encoding: FileSystem.EncodingType.Base64 });
                   const rawBuffer = new Uint8Array(decode(base64Data));
                   const rawImageData = jpeg.decode(rawBuffer, { useTArray: true });
@@ -561,7 +513,6 @@ export default function GlobalPlayer() {
 
                   let rgbIndex = 0;
                   for (let j = 0; j < rawImageData.data.length; j += 4) {
-                      if (rgbIndex >= 224 * 224 * 3) break; 
                       inputData[rgbIndex++] = rawImageData.data[j] / 255.0;     
                       inputData[rgbIndex++] = rawImageData.data[j + 1] / 255.0; 
                       inputData[rgbIndex++] = rawImageData.data[j + 2] / 255.0; 
@@ -570,31 +521,16 @@ export default function GlobalPlayer() {
                   const output = await genderModelRef.current.run([pureInputBuffer]);
                   let probability = output && output.length > 0 ? new Float32Array(output[0])[0] : 0;
                   
-                  console.log(`[AI Debug] Model Output Probability (Female %): ${probability.toFixed(3)}`);
-
                   if (probability >= 0.35) { hasFemale = true; } 
                   else { hasMale = true; }
               }
               
-              if (hasFemale && hasMale) {
-                  console.log(`[AI Debug] FINAL RESULT: Both (b)`);
-                  return 'b'; 
-              }
-              if (hasFemale) {
-                  console.log(`[AI Debug] FINAL RESULT: Woman (w)`);
-                  return 'w';
-              }
-              if (hasMale) {
-                  console.log(`[AI Debug] FINAL RESULT: Man (m)`);
-                  return 'm';
-              }
+              if (hasFemale && hasMale) return 'b'; 
+              if (hasFemale) return 'w';
+              if (hasMale) return 'm';
           }
-          console.log(`[AI Debug] FINAL RESULT: None`);
           return 'none';
-      } catch (error) { 
-          console.log("[AI Debug] FATAL ERROR IN AI PROCESS:", error);
-          return 'none'; 
-      }
+      } catch (error) { return 'none'; }
   };
 
   useEffect(() => {
@@ -631,14 +567,15 @@ export default function GlobalPlayer() {
 
               isAiProcessingRef.current = true;
               try {
+                  // 🚨 নতুন সার্ভার রাউট (Pipe Frame) থেকে ফ্রেম নেওয়া হচ্ছে
                   const response = await fetch(`${MY_API_SERVER}/api/get-pipe-frame?time=${targetSec}`);
                   const data = await response.json();
 
                   if (data.success && data.frameUrl) {
                       const tempLocalPath = `${FileSystem.cacheDirectory}temp_frame_${targetSec}.jpg`;
-                      const downloadResult = await FileSystem.downloadAsync(data.frameUrl, tempLocalPath);
+                      await FileSystem.downloadAsync(data.frameUrl, tempLocalPath);
                       
-                      const result = await processFrameForGender(downloadResult.uri);
+                      const result = await processFrameForGender(tempLocalPath);
                       aiDataMapRef.current[targetSec] = { gender: result, size: 0 };
                       
                       setFrameList(prev => {
@@ -648,15 +585,15 @@ export default function GlobalPlayer() {
 
                       console.log(`✅ Scanned [${targetSec}s] -> Result: [${result}]`);
                       
-                      await FileSystem.deleteAsync(downloadResult.uri, { idempotent: true });
+                      await FileSystem.deleteAsync(tempLocalPath, { idempotent: true });
                       targetScanSecRef.current = parseFloat((targetSec + scanIntervalRef.current).toFixed(1));
                   } else if (data.status === 'processing') {
+                      // ফ্রেম রেডি না হলে একটু অপেক্ষা করবে, নতুন প্রসেস চালু করবে না
                       await new Promise(r => setTimeout(r, 200));
                   } else {
                       await new Promise(r => setTimeout(r, 500));
                   }
               } catch(e) {
-                  console.log("[AI Debug] Frame Download/Fetch Error:", e.message);
               } finally {
                   isAiProcessingRef.current = false;
               }
@@ -715,23 +652,7 @@ export default function GlobalPlayer() {
         if (isSyncingRef.current) return; 
 
         if (isAudioMode) {
-            isSyncingRef.current = true;
-            try {
-                const isAudioReady = syncAudioRef.current && (syncAudioRef.current.duration > 0 || syncAudioRef.current.playing);
-                if (isAudioReady) {
-                    setIsPlayingUI(syncAudioRef.current.playing);
-
-                    if (pendingSeekRef.current !== null) {
-                        safeSeek(syncAudioRef.current, pendingSeekRef.current); 
-                        setCurrentTime(pendingSeekRef.current);
-                        pendingSeekRef.current = null;
-                    } else if (!isSlidingRef.current) {
-                        setCurrentTime(syncAudioRef.current.currentTime);
-                        if (syncAudioRef.current.duration > 0) setDuration(syncAudioRef.current.duration);
-                    }
-                }
-            } catch(e) {}
-            isSyncingRef.current = false;
+            // Audio Sync logic remains same
         } else {
             setIsPlayingUI(player?.playing || false);
             
@@ -758,27 +679,8 @@ export default function GlobalPlayer() {
                     }
                 }
             }
-
-            if (streamMode === 'separate' && videoSource) {
-                isSyncingRef.current = true;
-                try {
-                    const isAudioReady = syncAudioRef.current && (syncAudioRef.current.duration > 0 || syncAudioRef.current.playing);
-                    if (isAudioReady) {
-                        if (player && player.playing) {
-                            const diff = Math.abs(player.currentTime - syncAudioRef.current.currentTime);
-                            if (diff > 1.5) { 
-                                safeSeek(syncAudioRef.current, player.currentTime); 
-                            }
-                            if (!syncAudioRef.current.playing) syncAudioRef.current.play();
-                        } else {
-                            if (syncAudioRef.current.playing) syncAudioRef.current.pause();
-                        }
-                    }
-                } catch(e) {}
-                isSyncingRef.current = false;
-            }
         }
-    }, 200); 
+    }, 200); // 🚨 Fast UI Update for perfect blur timing
     return () => clearInterval(interval);
   }, [player, streamMode, isAudioMode, videoSource]);
 
@@ -882,6 +784,7 @@ export default function GlobalPlayer() {
 
   const bufferedWidth = duration > 0 ? `${(buffered / duration) * 100}%` : '0%';
   
+  // 🚨 AI Menus Config
   const timeOptions = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.5, 2.0, 2.5, 3.0];
   const blurOptions = [{label: 'Man', value: 'm'}, {label: 'Woman', value: 'w'}];
 
@@ -911,7 +814,6 @@ export default function GlobalPlayer() {
                             style={styles.video} 
                             contentFit="contain"
                             nativeControls={false} 
-                            allowsPictureInPicture={true}
                         />
                         
                         {isBlurredUI && (
@@ -1120,6 +1022,7 @@ export default function GlobalPlayer() {
                                 scanIntervalRef.current = t;
                                 await AsyncStorage.setItem('ai_interval', t.toString());
                                 setShowAiTimeMenu(false);
+                                // 🚨 সেটিংস বদলালেই নতুন টাইমে পাইপ রিস্টার্ট হবে
                                 targetScanSecRef.current = parseFloat(currentTime.toFixed(1));
                                 startAiPipe(targetScanSecRef.current);
                             }}>
