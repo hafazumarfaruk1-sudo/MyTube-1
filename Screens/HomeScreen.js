@@ -4,7 +4,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Global Theme & Language Context Imports
 import { useTheme } from '../ThemeContext'; 
 import { useLanguage } from '../LanguageContext'; 
 
@@ -20,25 +19,23 @@ global.seenVideoIds = global.seenVideoIds || new Set();
 export default function HomeScreen({ route }) {
   const navigation = useNavigation();
   const isFocused = useIsFocused();
-
   const { isDarkMode, toggleDarkMode } = useTheme();
   const { locale, changeLanguage, t } = useLanguage(); 
 
   const [activeTab, setActiveTab] = useState('Home');
   const [meView, setMeView] = useState('main'); 
-
   const [videos, setVideos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
-
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedShortId, setSelectedShortId] = useState(null);
-  const [thumbQuality, setThumbQuality] = useState(global.appSettings?.thumbnailQuality || 'High');
   const [activeQuery, setActiveQuery] = useState('');
 
-  const [videoScanSettings, setVideoScanSettings] = useState({}); 
+  // 🚨 Master Controls
+  const [thumbQuality, setThumbQuality] = useState(global.appSettings?.thumbnailQuality || 'High');
   const [masterVideoScan, setMasterVideoScan] = useState(global.appSettings?.aiVideoScan !== 'false');
+  const [videoScanSettings, setVideoScanSettings] = useState({}); 
 
   const getAlgorithmicTopic = async () => {
     try {
@@ -54,19 +51,16 @@ export default function HomeScreen({ route }) {
         const quality = await AsyncStorage.getItem('thumbnailQuality');
         if (quality) setThumbQuality(quality);
         
-        setMasterVideoScan(global.appSettings?.aiVideoScan !== 'false');
+        const aiScan = await AsyncStorage.getItem('ai_video_scan_master');
+        if (aiScan) setMasterVideoScan(aiScan !== 'false');
+
         if (!activeQuery) setActiveQuery(await getAlgorithmicTopic());
       } catch (e) {}
     };
     if (isFocused) loadGlobalData();
 
-    const qualitySub = DeviceEventEmitter.addListener('thumbQualityChanged', (newQuality) => {
-        setThumbQuality(newQuality);
-    });
-
-    const scanSub = DeviceEventEmitter.addListener('aiVideoScanChanged', (newScan) => {
-        setMasterVideoScan(newScan !== 'false');
-    });
+    const qualitySub = DeviceEventEmitter.addListener('thumbQualityChanged', (newQuality) => setThumbQuality(newQuality));
+    const scanSub = DeviceEventEmitter.addListener('aiVideoScanChanged', (newScan) => setMasterVideoScan(newScan !== 'false'));
 
     return () => { qualitySub.remove(); scanSub.remove(); }
   }, [isFocused]);
@@ -84,10 +78,7 @@ export default function HomeScreen({ route }) {
 
   useEffect(() => {
     const backAction = () => {
-      if (activeTab === 'ME' && meView !== 'main') {
-        setMeView('main');
-        return true;
-      }
+      if (activeTab === 'ME' && meView !== 'main') { setMeView('main'); return true; }
       return false;
     };
     const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
@@ -159,19 +150,24 @@ export default function HomeScreen({ route }) {
     } catch (e) {} finally { setLoading(false); setRefreshing(false); }
   };
 
+  // 🚨 Local Scan Override Toggle
   const toggleVideoScan = (id) => {
-      setVideoScanSettings(prev => ({...prev, [id]: !prev[id]}));
+      setVideoScanSettings(prev => {
+          const currentState = prev[id] !== undefined ? prev[id] : masterVideoScan;
+          return { ...prev, [id]: !currentState };
+      });
   };
 
   const navigateToPlayer = (item) => {
-    const doScan = masterVideoScan ? (videoScanSettings[item.id] !== false) : false;
+    const doScan = videoScanSettings[item.id] !== undefined ? videoScanSettings[item.id] : masterVideoScan;
     navigation.navigate('Player', { videoId: item.id, videoData: item, aiScanEnabled: doScan });
   };
 
   const styles = getDynamicStyles(isDarkMode);
 
   const renderVideoItem = ({ item }) => {
-    const isScanOn = videoScanSettings[item.id] !== false; 
+    // 🚨 Calculate current visual state for the button
+    const isScanOn = videoScanSettings[item.id] !== undefined ? videoScanSettings[item.id] : masterVideoScan;
     
     return (
       <View style={styles.videoCard}>
@@ -189,22 +185,22 @@ export default function HomeScreen({ route }) {
             <Text style={styles.meta}>{item.channel} • {item.views}</Text>
           </View>
 
-          {masterVideoScan && (
-              <TouchableOpacity 
-                  style={[styles.videoAiScanToggle, { borderColor: isScanOn ? '#00BFA5' : '#555' }]} 
-                  onPress={() => toggleVideoScan(item.id)}
-              >
-                  <Ionicons name="hardware-chip-outline" size={16} color={isScanOn ? '#00BFA5' : '#888'} />
-                  <Text style={{ fontSize: 10, color: isScanOn ? '#00BFA5' : '#888', marginTop: 2, fontWeight: 'bold' }}>
-                      {isScanOn ? 'SCAN ON' : 'SCAN OFF'}
-                  </Text>
-              </TouchableOpacity>
-          )}
+          {/* 🚨 Button is ALWAYS visible. Color indicates state */}
+          <TouchableOpacity 
+              style={[styles.videoAiScanToggle, { borderColor: isScanOn ? '#00BFA5' : (isDarkMode ? '#444' : '#CCC') }]} 
+              onPress={() => toggleVideoScan(item.id)}
+          >
+              <Ionicons name="hardware-chip-outline" size={16} color={isScanOn ? '#00BFA5' : (isDarkMode ? '#888' : '#999')} />
+              <Text style={{ fontSize: 9, color: isScanOn ? '#00BFA5' : (isDarkMode ? '#888' : '#999'), marginTop: 2, fontWeight: 'bold' }}>
+                  {isScanOn ? 'SCAN ON' : 'SCAN OFF'}
+              </Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
   };
 
+  // ... (Other Menus mapping remains same) ...
   const MeMenuCard = ({ icon, iconBg, iconColor, title, subtitle, onPress, isSwitch, switchValue, onSwitchChange }) => (
     <TouchableOpacity style={styles.meMenuCard} activeOpacity={isSwitch ? 1 : 0.8} onPress={isSwitch ? null : onPress}>
       <View style={[styles.meMenuIconBox, { backgroundColor: iconBg }]}>
@@ -333,46 +329,50 @@ export default function HomeScreen({ route }) {
   );
 }
 
-const getDynamicStyles = (isDark) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: isDark ? '#000' : '#F5F5F5', paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: isDark ? '#222' : '#E0E0E0', width: '100%', backgroundColor: isDark ? '#0F0F0F' : '#FFFFFF' },
-  logoContainer: { flexDirection: 'row', alignItems: 'center', width: 105 },
-  logoText: { color: isDark ? '#FFF' : '#000', fontSize: 16, fontWeight: 'bold', marginLeft: 4 },
-  searchBar: { flex: 1, flexDirection: 'row', backgroundColor: isDark ? '#222' : '#F0F0F0', borderRadius: 20, marginHorizontal: 8, paddingHorizontal: 12, alignItems: 'center', height: 38 },
-  mainContent: { flex: 1, backgroundColor: isDark ? '#0F0F0F' : '#F9F9F9' },
-  videoCard: { marginBottom: 15 },
-  thumbnail: { width: '100%', aspectRatio: 16 / 9, backgroundColor: isDark ? '#111' : '#EAEAEA' },
-  durationBadge: { position: 'absolute', bottom: 8, right: 8, backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 },
-  durationText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
-  videoInfo: { flexDirection: 'row', padding: 12, alignItems: 'center' },
-  channelAvatar: { width: 36, height: 36, borderRadius: 18, marginRight: 12, backgroundColor: isDark ? '#333' : '#CCC' },
-  textContainer: { flex: 1, paddingRight: 10 },
-  title: { color: isDark ? '#FFF' : '#000', fontSize: 14, fontWeight: '500' },
-  meta: { color: isDark ? '#AAA' : '#666', fontSize: 12, marginTop: 4 },
-  videoAiScanToggle: { padding: 6, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center', width: 60, marginLeft: 10 },
-  skeletonCard: { backgroundColor: isDark ? '#18181b' : '#FFFFFF', borderRadius: 12, overflow: 'hidden', marginHorizontal: 10, marginBottom: 20, borderWidth: isDark ? 0 : 1, borderColor: '#EEE' },
-  skeletonThumbnail: { width: '100%', aspectRatio: 16 / 9, backgroundColor: isDark ? '#27272a' : '#E0E0E0' },
-  skeletonInfo: { flexDirection: 'row', padding: 12, alignItems: 'center' },
-  skeletonAvatar: { width: 40, height: 40, borderRadius: 20, marginRight: 12, backgroundColor: isDark ? '#27272a' : '#E0E0E0' },
-  skeletonTextContainer: { flex: 1, justifyContent: 'center' },
-  skeletonTitle: { height: 14, backgroundColor: isDark ? '#27272a' : '#E0E0E0', borderRadius: 4, marginBottom: 10, width: '90%' },
-  skeletonMeta: { height: 12, backgroundColor: isDark ? '#27272a' : '#E0E0E0', borderRadius: 4, width: '60%' },
-  tabBar: { flexDirection: 'row', height: 55, borderTopWidth: 1, borderTopColor: isDark ? '#1a1a1a' : '#E0E0E0', backgroundColor: isDark ? '#0a0a0a' : '#FFFFFF', paddingBottom: 5 },
-  tab: { flex: 1, justifyContent: 'center', alignItems: 'center', position: 'relative' },
-  activeTabLine: { position: 'absolute', top: -1, width: '40%', height: 2, backgroundColor: '#FF0000', borderBottomLeftRadius: 2, borderBottomRightRadius: 2 },
-  tabText: { fontSize: 10, color: isDark ? '#666' : '#999', marginTop: 4, fontWeight: '500' },
-  meContainer: { flex: 1, backgroundColor: isDark ? '#0F0F0F' : '#F2F2F7', paddingTop: 20 },
-  meSectionTitle: { color: isDark ? '#666' : '#888', fontSize: 12, fontWeight: 'bold', letterSpacing: 1.5, marginLeft: 20, marginBottom: 15 },
-  meMenuWrapper: { paddingHorizontal: 16, paddingBottom: 20 },
-  meMenuCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? '#15171a' : '#FFFFFF', borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: isDark ? '#1f2229' : '#EAEAEA' },
-  meMenuIconBox: { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
-  meMenuTextContent: { flex: 1 },
-  meMenuTitle: { color: isDark ? '#FFF' : '#000', fontSize: 16, fontWeight: '600', marginBottom: 4 },
-  meMenuSubtitle: { color: isDark ? '#888' : '#666', fontSize: 12 },
-  subScreenHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: isDark ? '#1a1a1a' : '#EAEAEA', marginBottom: 20 },
-  subScreenTitle: { fontSize: 18, fontWeight: 'bold', color: isDark ? '#FFF' : '#000' },
-  languageItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 18, paddingHorizontal: 20, backgroundColor: isDark ? '#15171a' : '#FFFFFF', borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: isDark ? '#1f2229' : '#EAEAEA' },
-  languageItemSelected: { borderColor: '#FF0000', backgroundColor: isDark ? 'rgba(255, 0, 0, 0.05)' : 'rgba(255, 0, 0, 0.03)' },
-  languageItemText: { fontSize: 16, color: isDark ? '#FFF' : '#000' },
-  languageItemTextSelected: { color: '#FF0000', fontWeight: 'bold' }
-});
+function getDynamicStyles(isDark) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: isDark ? '#000' : '#F5F5F5', paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 },
+    header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: isDark ? '#222' : '#E0E0E0', width: '100%', backgroundColor: isDark ? '#0F0F0F' : '#FFFFFF' },
+    logoContainer: { flexDirection: 'row', alignItems: 'center', width: 105 },
+    logoText: { color: isDark ? '#FFF' : '#000', fontSize: 16, fontWeight: 'bold', marginLeft: 4 },
+    searchBar: { flex: 1, flexDirection: 'row', backgroundColor: isDark ? '#222' : '#F0F0F0', borderRadius: 20, marginHorizontal: 8, paddingHorizontal: 12, alignItems: 'center', height: 38 },
+    mainContent: { flex: 1, backgroundColor: isDark ? '#0F0F0F' : '#F9F9F9' },
+    videoCard: { marginBottom: 15 },
+    thumbnail: { width: '100%', aspectRatio: 16 / 9, backgroundColor: isDark ? '#111' : '#EAEAEA' },
+    durationBadge: { position: 'absolute', bottom: 8, right: 8, backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 },
+    durationText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
+    videoInfo: { flexDirection: 'row', padding: 12, alignItems: 'center' },
+    channelAvatar: { width: 36, height: 36, borderRadius: 18, marginRight: 12, backgroundColor: isDark ? '#333' : '#CCC' },
+    textContainer: { flex: 1, paddingRight: 10 },
+    title: { color: isDark ? '#FFF' : '#000', fontSize: 14, fontWeight: '500' },
+    meta: { color: isDark ? '#AAA' : '#666', fontSize: 12, marginTop: 4 },
+    // 🚨 Toggle Style update
+    videoAiScanToggle: { padding: 6, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center', width: 60, marginLeft: 'auto' },
+    
+    skeletonCard: { backgroundColor: isDark ? '#18181b' : '#FFFFFF', borderRadius: 12, overflow: 'hidden', marginHorizontal: 10, marginBottom: 20, borderWidth: isDark ? 0 : 1, borderColor: '#EEE' },
+    skeletonThumbnail: { width: '100%', aspectRatio: 16 / 9, backgroundColor: isDark ? '#27272a' : '#E0E0E0' },
+    skeletonInfo: { flexDirection: 'row', padding: 12, alignItems: 'center' },
+    skeletonAvatar: { width: 40, height: 40, borderRadius: 20, marginRight: 12, backgroundColor: isDark ? '#27272a' : '#E0E0E0' },
+    skeletonTextContainer: { flex: 1, justifyContent: 'center' },
+    skeletonTitle: { height: 14, backgroundColor: isDark ? '#27272a' : '#E0E0E0', borderRadius: 4, marginBottom: 10, width: '90%' },
+    skeletonMeta: { height: 12, backgroundColor: isDark ? '#27272a' : '#E0E0E0', borderRadius: 4, width: '60%' },
+    tabBar: { flexDirection: 'row', height: 55, borderTopWidth: 1, borderTopColor: isDark ? '#1a1a1a' : '#E0E0E0', backgroundColor: isDark ? '#0a0a0a' : '#FFFFFF', paddingBottom: 5 },
+    tab: { flex: 1, justifyContent: 'center', alignItems: 'center', position: 'relative' },
+    activeTabLine: { position: 'absolute', top: -1, width: '40%', height: 2, backgroundColor: '#FF0000', borderBottomLeftRadius: 2, borderBottomRightRadius: 2 },
+    tabText: { fontSize: 10, color: isDark ? '#666' : '#999', marginTop: 4, fontWeight: '500' },
+    meContainer: { flex: 1, backgroundColor: isDark ? '#0F0F0F' : '#F2F2F7', paddingTop: 20 },
+    meSectionTitle: { color: isDark ? '#666' : '#888', fontSize: 12, fontWeight: 'bold', letterSpacing: 1.5, marginLeft: 20, marginBottom: 15 },
+    meMenuWrapper: { paddingHorizontal: 16, paddingBottom: 20 },
+    meMenuCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? '#15171a' : '#FFFFFF', borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: isDark ? '#1f2229' : '#EAEAEA' },
+    meMenuIconBox: { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+    meMenuTextContent: { flex: 1 },
+    meMenuTitle: { color: isDark ? '#FFF' : '#000', fontSize: 16, fontWeight: '600', marginBottom: 4 },
+    meMenuSubtitle: { color: isDark ? '#888' : '#666', fontSize: 12 },
+    subScreenHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: isDark ? '#1a1a1a' : '#EAEAEA', marginBottom: 20 },
+    subScreenTitle: { fontSize: 18, fontWeight: 'bold', color: isDark ? '#FFF' : '#000' },
+    languageItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 18, paddingHorizontal: 20, backgroundColor: isDark ? '#15171a' : '#FFFFFF', borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: isDark ? '#1f2229' : '#EAEAEA' },
+    languageItemSelected: { borderColor: '#FF0000', backgroundColor: isDark ? 'rgba(255, 0, 0, 0.05)' : 'rgba(255, 0, 0, 0.03)' },
+    languageItemText: { fontSize: 16, color: isDark ? '#FFF' : '#000' },
+    languageItemTextSelected: { color: '#FF0000', fontWeight: 'bold' }
+  });
+}
