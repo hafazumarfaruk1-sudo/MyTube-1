@@ -25,14 +25,8 @@ export default function PlayerScreen({ route, navigation }) {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
 
-  const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [showDescModal, setShowDescModal] = useState(false);
   const [showCommentModal, setShowCommentModal] = useState(false);
-
-  const [downloadStep, setDownloadStep] = useState('fetching'); 
-  const [downloadLinks, setDownloadLinks] = useState([]);
-  const [downloadType, setDownloadType] = useState('video'); 
-  const [isDownloading, setIsDownloading] = useState(false);
 
   const [liveAvatar, setLiveAvatar] = useState(null);
   const [description, setDescription] = useState('');
@@ -191,38 +185,9 @@ export default function PlayerScreen({ route, navigation }) {
   };
 
   // 🎯 🚀 [FIX]: থাম্বনেইল এবং ভিডিও আইডি সরাসরি পাঠানো হচ্ছে
-  const handleDownloadExecute = async (item) => {
-    try {
-      setShowDownloadModal(false); setIsDownloading(true); setTimeout(() => setIsDownloading(false), 2000);
-      const downloadId = Date.now().toString(); 
-      const safeTitle = (videoData.title || 'video').replace(/[<>:"\/\\|?*]+/g, '').trim();
-      const targetUrl = `https://www.youtube.com/watch?v=${videoId}`;
-      const thumbUrl = videoData.thumbnail || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
-      
-      const dlApiUrl = `${MY_API_SERVER}/api/aria-download?id=${downloadId}&videoId=${videoId}&url=${encodeURIComponent(targetUrl)}&quality=${encodeURIComponent(item.quality)}&type=${downloadType}&title=${encodeURIComponent(safeTitle)}&thumbnail=${encodeURIComponent(thumbUrl)}`;
-      
-      await fetch(dlApiUrl);
-    } catch (error) { Alert.alert("Error", "Could not connect to server."); }
-  };
 
-  const openDownloadWindow = () => { setShowDownloadModal(true); setDownloadType('video'); setDownloadStep('fetching'); fetchDownloadLinks('video'); };
+  const openDownloadWindow = () => { DeviceEventEmitter.emit('triggerDownloadOverlay', { videoId: videoId, title: videoData?.title, thumbnail: videoData?.thumbnail }); };
 
-  const changeDownloadType = (type) => {
-      if(downloadType === type) return;
-      setDownloadType(type); setDownloadStep('fetching'); fetchDownloadLinks(type);
-  };
-
-  const fetchDownloadLinks = async (type) => {
-    try {
-      const targetUrl = `https://www.youtube.com/watch?v=${videoId}`;
-      const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(targetUrl)}&action=download&type=${type}`;
-      const response = await fetch(apiUrl);
-      const data = await response.json();
-      if (data.success && data.availableLinks) {
-        setDownloadLinks(data.availableLinks); setDownloadStep('list');
-      } else { Alert.alert("Error", "No links found."); setShowDownloadModal(false); }
-    } catch (error) { setShowDownloadModal(false); }
-  };
 
   const fetchRelatedVideos = async (isLoadMore = false) => {
     if (isLoadMore) setIsLoadingMore(true);
@@ -263,25 +228,6 @@ export default function PlayerScreen({ route, navigation }) {
     } catch (e) {} finally { setIsLoadingMore(false); }
   };
 
-  const getSortedLinks = () => {
-      if(!downloadLinks) return [];
-      return [...downloadLinks].sort((a, b) => {
-          const valA = parseInt(a.quality.replace(/[^0-9]/g, '')) || 0; const valB = parseInt(b.quality.replace(/[^0-9]/g, '')) || 0;
-          return valA - valB; 
-      });
-  };
-
-  const formatQualityText = (text) => {
-      if (!text) return "";
-      return text.replace(/(\d+)p/, (match, heightStr) => {
-          const height = parseInt(heightStr);
-          if (height >= 1000) {
-              if (height === 1440) return '2K'; if (height === 2160) return '4K'; 
-              return (height / 1000).toFixed(1) + 'K'; 
-          }
-          return match; 
-      });
-  };
 
   const displayAvatar = liveAvatar || (videoData?.avatar && videoData.avatar.trim() !== '' ? (videoData.avatar.startsWith('//') ? `https:${videoData.avatar}` : videoData.avatar) : null) || `https://ui-avatars.com/api/?name=${encodeURIComponent(videoData?.channel || 'YT')}&background=random&color=fff&size=100`;
 
@@ -291,7 +237,7 @@ export default function PlayerScreen({ route, navigation }) {
       <Text style={styles.mainViews}>{videoData?.views} {videoData?.publishedTime ? `• ${videoData.publishedTime}` : ''}</Text>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actionRowContainer}>
-          <TouchableOpacity style={styles.actionPill} onPress={loadDescription}>
+              <TouchableOpacity style={styles.actionPill} onPress={loadDescription}>
               <Ionicons name="document-text-outline" size={18} color={isDarkMode ? '#FFF' : '#111'} />
               <Text style={styles.actionPillText}>{t('Description')}</Text>
           </TouchableOpacity>
@@ -307,7 +253,7 @@ export default function PlayerScreen({ route, navigation }) {
           </TouchableOpacity>
 
           {!videoData.localUri && (
-              <TouchableOpacity style={styles.actionPill} onPress={openDownloadWindow}>
+              <TouchableOpacity style={styles.actionPill} onPress={() => DeviceEventEmitter.emit('triggerDownloadOverlay', { videoId: videoId, title: videoData?.title, thumbnail: videoData?.thumbnail })}>
                   <Ionicons name="download-outline" size={18} color={isDarkMode ? '#FFF' : '#111'} />
                   <Text style={styles.actionPillText}>{t('Download')}</Text>
               </TouchableOpacity>
@@ -477,49 +423,6 @@ export default function PlayerScreen({ route, navigation }) {
                     <View style={styles.commentPlaceholder}><Ionicons name="chatbubble-ellipses-outline" size={60} color="#444" /><Text style={styles.commentPlaceholderText}>{t('No comments found')}</Text></View>
                 )}
             </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Download Modal */}
-      <Modal visible={showDownloadModal} transparent animationType="slide" onRequestClose={() => setShowDownloadModal(false)}>
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setShowDownloadModal(false)} />
-          <View style={styles.modalContent}>
-            <View style={styles.modalDragIndicator} />
-            <View style={styles.modalHeader}>
-              <View style={{ flex: 1 }} />
-              <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setShowDownloadModal(false)}><Ionicons name="close" size={20} color={isDarkMode ? '#FFF' : '#111'} /></TouchableOpacity>
-            </View>
-
-            <View style={styles.tabContainer}>
-                <TouchableOpacity style={[styles.tabButton, downloadType === 'video' && styles.activeTabButton]} onPress={() => changeDownloadType('video')}>
-                    <Ionicons name="videocam" size={16} color={downloadType === 'video' ? '#FFF' : '#888'} />
-                    <Text style={[styles.tabText, downloadType === 'video' && styles.activeTabText]}>{t('Video')}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.tabButton, downloadType === 'audio' && styles.activeTabButton]} onPress={() => changeDownloadType('audio')}>
-                    <Ionicons name="musical-notes" size={16} color={downloadType === 'audio' ? '#FFF' : '#888'} />
-                    <Text style={[styles.tabText, downloadType === 'audio' && styles.activeTabText]}>{t('Audio')}</Text>
-                </TouchableOpacity>
-            </View>
-
-            {downloadStep === 'fetching' ? (
-              <View style={styles.loadingContainer}><ActivityIndicator size="large" color="#00BFA5" /><Text style={styles.loadingText}>{t('Fetching links...')}</Text></View>
-            ) : (
-              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.qualityListContainer}>
-                {getSortedLinks().map((item, index) => (
-                  <TouchableOpacity key={index} style={styles.qualityCard} onPress={() => handleDownloadExecute(item)}>
-                    <View style={styles.qualityInfoLeft}>
-                      <View style={styles.qualityIconBg}><Ionicons name={downloadType === 'audio' ? "headset" : "videocam"} size={18} color="#00BFA5" /></View>
-                      <View style={{ marginLeft: 10 }}>
-                        <Text style={styles.qualityText}>{formatQualityText(item.quality)}</Text><Text style={styles.qualitySubText}>{item.size || (downloadType === 'video' ? 'MP4' : 'MP3')}</Text>
-                      </View>
-                    </View>
-                    <View style={styles.downloadIconBtn}><Ionicons name="download-outline" size={18} color="#00BFA5" /></View>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            )}
           </View>
         </View>
       </Modal>
