@@ -32,7 +32,7 @@ export default function ChannelScreen() {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isLiveChannel, setIsLiveChannel] = useState(false); 
   const [liveVideoData, setLiveVideoData] = useState(null);
-  const [thumbQuality, setThumbQuality] = useState('High');
+  const [thumbQuality, setThumbQuality] = useState('High'); // অরিজিনাল স্টেটটি রেখে দেওয়া হয়েছে
   const [subscriberCount, setSubscriberCount] = useState('N/A');
 
   const [tabData, setTabData] = useState({ Videos: [], Shorts: [] });
@@ -40,9 +40,12 @@ export default function ChannelScreen() {
   const [shortToken, setShortToken] = useState(null);
   const [apiKey, setApiKey] = useState(null);
 
-  // 🎯 ব্যানার এবং লোগো লোডিংয়ের স্টেট
   const [channelBanner, setChannelBanner] = useState(null);
   const [isBannerLoaded, setIsBannerLoaded] = useState(false);
+
+  // 🚨 [NEW] AI Video Scan Controls 
+  const [masterVideoScan, setMasterVideoScan] = useState(global.appSettings?.aiVideoScan !== 'false');
+  const [videoScanSettings, setVideoScanSettings] = useState({});
 
   useEffect(() => {
     fetchChannelData();
@@ -58,14 +61,22 @@ export default function ChannelScreen() {
         }
         const quality = await AsyncStorage.getItem('thumbnailQuality');
         if (quality) setThumbQuality(quality);
+
+        // 🚨 Load AI Scan Master Setting
+        const aiScan = await AsyncStorage.getItem('ai_video_scan_master');
+        if (aiScan) setMasterVideoScan(aiScan !== 'false');
       } catch (e) {
         console.error("❌ [MyTube Error] AsyncStorage লোড করতে সমস্যা:", e.message);
       }
     };
     if (isFocused) loadGlobals();
+
+    // 🚨 Listen for AI Scan Global Changes
+    const scanSub = DeviceEventEmitter.addListener('aiVideoScanChanged', (newScan) => setMasterVideoScan(newScan !== 'false'));
+    return () => { scanSub.remove(); }
   }, [channelName, isFocused]);
 
-  // 🧠 স্মার্ট স্ক্যানার (Views এবং Published Time ফিক্স সহ)
+  // 🧠 অরিজিনাল এক্সট্রাক্টর লজিক (যাতে কোন সমস্যা না হয়)
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
     try {
       const stack = [{ node: rootNode, currentTitle: 'Unknown Title' }];
@@ -105,24 +116,16 @@ export default function ChannelScreen() {
             seenIds.add(node.videoId);
             const vId = node.videoId;
 
-            let exactTitle = node.title?.runs?.[0]?.text || 
-                             node.title?.simpleText || 
-                             node.headline?.runs?.[0]?.text || 
-                             node.headline?.simpleText || 
-                             node.title?.content ||
-                             newTitle;
+            let exactTitle = node.title?.runs?.[0]?.text || node.title?.simpleText || node.headline?.runs?.[0]?.text || node.headline?.simpleText || node.title?.content || newTitle;
 
             if (!exactTitle || exactTitle === 'Unknown Title') {
-               console.warn(`⚠️ [MyTube Warning]: Title not found for video ID - ${vId}. Defaulting to 'Unknown Title'.`);
                exactTitle = 'Unknown Title'; 
             }
 
-            // 🎯 Duration, Views এবং Published Time বের করার সাধারণ উপায়
             let duration = node.lengthText?.simpleText || node.lengthText?.runs?.[0]?.text || '';
             let publishedTime = node.publishedTimeText?.simpleText || node.publishedTimeText?.runs?.[0]?.text || '';
             let views = node.viewCountText?.simpleText || node.viewCountText?.runs?.[0]?.text || node.shortViewCountText?.simpleText || node.shortViewCountText?.runs?.[0]?.text || '';
 
-            // 🎯 Duration এর অল্টারনেটিভ ফলব্যাক
             if (!duration && node.thumbnailOverlays) {
               const timeOverlay = node.thumbnailOverlays.find(o => o.thumbnailOverlayTimeStatusRenderer);
               if (timeOverlay) {
@@ -130,15 +133,13 @@ export default function ChannelScreen() {
               }
             }
 
-            // 🎯 YouTube এর নতুন ViewModel আর্কিটেকচার থেকে Views ও Time বের করা
             const metaContent = node.metadata?.lockupMetadataViewModel?.metadata?.content;
             if (metaContent && typeof metaContent === 'string') {
-              // metaContent সাধারণত এমন হয়: "15K views • 2 days ago"
               const parts = metaContent.split('•').map(p => p.trim());
 
               if (parts.length > 1) {
-                if (!views) views = parts[0]; // প্রথম অংশ Views
-                if (!publishedTime) publishedTime = parts[1]; // দ্বিতীয় অংশ Published Time
+                if (!views) views = parts[0]; 
+                if (!publishedTime) publishedTime = parts[1]; 
               } else if (parts.length === 1) {
                 if (parts[0].toLowerCase().includes('view') || parts[0].includes('ভিজ্যুয়াল')) {
                    if (!views) views = parts[0];
@@ -304,8 +305,6 @@ export default function ChannelScreen() {
         return; 
       }
 
-      console.log(`✅ [MyTube Info] Target Channel URL: ${extractedChannelUrl}`);
-
       let targetVideosUrl = `https://www.youtube.com${extractedChannelUrl}/videos`;
       let targetShortsUrl = `https://www.youtube.com${extractedChannelUrl}/shorts`;
 
@@ -320,7 +319,6 @@ export default function ChannelScreen() {
       const apiMatch = videosHtml.match(/"INNERTUBE_API_KEY":"(.*?)"/);
       if (apiMatch && apiMatch[1]) {
           setApiKey(apiMatch[1]);
-          console.log(`🔑 [MyTube Info] API Key পাওয়া গেছে.`);
       }
 
       let parsedVideosData = parseYtData(videosHtml);
@@ -355,7 +353,6 @@ export default function ChannelScreen() {
       setShortToken(categorizedData.ShortsToken);
 
       setTabData({ Videos: categorizedData.Videos, Shorts: categorizedData.Shorts });
-      console.log(`✅ [MyTube Info] Total Videos: ${categorizedData.Videos.length}, Total Shorts: ${categorizedData.Shorts.length}`);
 
       let extractedBanner = null;
       if (parsedVideosData) extractedBanner = findBannerUrl(parsedVideosData);
@@ -409,7 +406,6 @@ export default function ChannelScreen() {
     if (!currentToken || isLoadingMore || !apiKey) return;
 
     setIsLoadingMore(true);
-    console.log(`📡 [MyTube Info] Pagination: আরও ${activeTab} লোড করা হচ্ছে...`);
 
     try {
       const response = await fetch(`https://www.youtube.com/youtubei/v1/browse?key=${apiKey}`, {
@@ -436,7 +432,6 @@ export default function ChannelScreen() {
       const filteredNewItems = newData[activeTab].filter(newObj => !tabData[activeTab].some(existingObj => existingObj.id === newObj.id));
 
       setTabData(prev => ({ ...prev, [activeTab]: [...prev[activeTab], ...filteredNewItems] }));
-      console.log(`✅ [MyTube Info] আরও ${filteredNewItems.length} টি ${activeTab} যুক্ত করা হলো।`);
 
       if (activeTab === 'Videos') setVideoToken(newData.VideosToken || null);
       else setShortToken(newData.ShortsToken || null);
@@ -466,10 +461,20 @@ export default function ChannelScreen() {
     }
   };
 
+  // 🚨 [NEW] Local AI Scan Toggle
+  const toggleVideoScan = (id) => {
+      setVideoScanSettings(prev => {
+          const currentState = prev[id] !== undefined ? prev[id] : masterVideoScan;
+          return { ...prev, [id]: !currentState };
+      });
+  };
+
+  // 🚨 [UPDATED] Passing AI Scan settings to Player
   const handleVideoPress = (item) => {
     const videoInfo = { ...item, avatar: channelAvatar };
-    DeviceEventEmitter.emit('playVideo', { videoId: item.id, videoData: videoInfo, channelAvatar: channelAvatar });
-    navigation.navigate('Player', { videoId: item.id, videoData: videoInfo, channelAvatar: channelAvatar });
+    const doScan = videoScanSettings[item.id] !== undefined ? videoScanSettings[item.id] : masterVideoScan;
+    DeviceEventEmitter.emit('playVideo', { videoId: item.id, videoData: videoInfo, channelAvatar: channelAvatar, aiScanEnabled: doScan });
+    navigation.navigate('Player', { videoId: item.id, videoData: videoInfo, channelAvatar: channelAvatar, aiScanEnabled: doScan });
   };
 
   const handleShortPress = (item, index) => {
@@ -485,7 +490,10 @@ export default function ChannelScreen() {
     });
   };
 
+  // 🚨 [UPDATED] Rendering with AI Toggle Button
   const renderVideoItem = ({ item }) => {
+    const isScanOn = videoScanSettings[item.id] !== undefined ? videoScanSettings[item.id] : masterVideoScan;
+
     return (
       <TouchableOpacity style={styles.vidmateCard} activeOpacity={0.8} onPress={() => handleVideoPress(item)}>
         <View style={styles.thumbnailWrapper}>
@@ -500,6 +508,18 @@ export default function ChannelScreen() {
             {item.views && item.publishedTime ? ' • ' : ''}
             {item.publishedTime ? `${item.publishedTime}` : ''}
           </Text>
+        </View>
+
+        <View style={{ justifyContent: 'center', marginLeft: 10 }}>
+          <TouchableOpacity 
+              style={[styles.videoAiScanToggle, { borderColor: isScanOn ? '#00BFA5' : (isDarkMode ? '#444' : '#CCC') }]} 
+              onPress={() => toggleVideoScan(item.id)}
+          >
+              <Ionicons name="hardware-chip-outline" size={16} color={isScanOn ? '#00BFA5' : (isDarkMode ? '#888' : '#999')} />
+              <Text style={{ fontSize: 9, color: isScanOn ? '#00BFA5' : (isDarkMode ? '#888' : '#999'), marginTop: 2, fontWeight: 'bold' }}>
+                  {isScanOn ? 'SCAN ON' : 'SCAN OFF'}
+              </Text>
+          </TouchableOpacity>
         </View>
       </TouchableOpacity>
     );
@@ -649,6 +669,9 @@ function getDynamicStyles(isDark) {
     infoWrapper: { flex: 1, marginLeft: 12, justifyContent: 'center' },
     vidmateTitle: { color: isDark ? '#FFF' : '#000', fontSize: 14, fontWeight: 'bold', marginBottom: 6, lineHeight: 20 },
     vidmateMeta: { color: isDark ? '#AAA' : '#666', fontSize: 12, marginBottom: 0 }, 
+
+    // 🚨 Toggle Button Styles
+    videoAiScanToggle: { padding: 6, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center', width: 60 },
 
     shortsColumnWrapper: { 
       justifyContent: 'flex-start', 
