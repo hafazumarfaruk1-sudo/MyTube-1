@@ -186,10 +186,6 @@ export default function PlayerScreen({ route, navigation }) {
       setShowCommentModal(false); navigation.navigate('Channel', { channelName, channelAvatar, channelId });
   };
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-  // 🎯 🚀 [FIX]: থাম্বনেইল এবং ভিডিও আইডি সরাসরি পাঠানো হচ্ছে
 
   const openDownloadWindow = () => { DeviceEventEmitter.emit('triggerDownloadOverlay', { videoId: videoId, title: videoData?.title, thumbnail: videoData?.thumbnail }); };
 
@@ -197,9 +193,6 @@ export default function PlayerScreen({ route, navigation }) {
   const openDownloadWindow = () => { DeviceEventEmitter.emit('triggerDownloadOverlay', { videoId: videoId, title: videoData?.title, thumbnail: videoData?.thumbnail }); };
 
 >>>>>>> b10729fc5330650efa3c192215a70c989abfe763
-=======
-  // 🎯 গ্লোবাল ডাউনলোড ট্রিগার
-=======
 >>>>>>> 89dbf3b761f5c99b4f88b07cc85334ebe3bd435e
   const openDownloadWindow = () => { 
       DeviceEventEmitter.emit('triggerDownloadOverlay', { videoId: videoId, title: videoData?.title, thumbnail: videoData?.thumbnail }); 
