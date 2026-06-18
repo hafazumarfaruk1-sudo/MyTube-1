@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, SafeAreaView, Platform, StatusBar, Keyboard, ActivityIndicator, Image, Dimensions, InteractionManager } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, SafeAreaView, Platform, StatusBar, Keyboard, ActivityIndicator, Image, Dimensions, InteractionManager, DeviceEventEmitter } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Theme & Language
 import { useTheme } from '../ThemeContext';
 import { useLanguage } from '../LanguageContext';
 
@@ -25,7 +24,7 @@ export default function SearchSettingScreen({ route }) {
   const inputRef = useRef(null);
   const { isDarkMode } = useTheme();
   const { t } = useLanguage();
-  const __translate = t; // Alias for your original code usage
+  const __translate = t; 
   const styles = getDynamicStyles(isDarkMode);
 
   const [query, setQuery] = useState('');
@@ -42,12 +41,16 @@ export default function SearchSettingScreen({ route }) {
 
   // 🤖 [AI STATES & REFS]
   const genderModelRef = useRef(null);
-  const scanQueueRef = useRef([]); // স্ক্যান করার জন্য লাইনে থাকা থাম্বনেইল
+  const scanQueueRef = useRef([]); 
   const isQueueProcessingRef = useRef(false);
   
-  // Status: 'pending' (কালো) -> 'scanning' (লোডিং) -> 'clean' (স্বাভাবিক) -> 'blur' (মহিলা)
   const [thumbStates, setThumbStates] = useState({}); 
-  const [videoScanSettings, setVideoScanSettings] = useState({}); // ভিডিও স্ক্যানিং অন/অফ স্টেট
+  const [videoScanSettings, setVideoScanSettings] = useState({}); 
+
+  // 🚨 [NEW] Master Controls
+  const [masterVideoScan, setMasterVideoScan] = useState(global.appSettings?.aiVideoScan !== 'false');
+  const [masterThumbScan, setMasterThumbScan] = useState(global.appSettings?.aiThumbScan !== 'false');
+  const [masterThumbQuality, setMasterThumbQuality] = useState(global.appSettings?.thumbnailQuality || 'High');
 
   useEffect(() => {
     const loadData = async () => {
@@ -64,6 +67,12 @@ export default function SearchSettingScreen({ route }) {
         return () => clearTimeout(timeout);
       });
     }
+
+    // Listen to Quality Changes from Settings Screen
+    const qSub = DeviceEventEmitter.addListener('thumbQualityChanged', (val) => {
+        setMasterThumbQuality(val);
+    });
+    return () => { qSub.remove(); }
   }, []);
 
   useEffect(() => {
@@ -74,18 +83,16 @@ export default function SearchSettingScreen({ route }) {
     }
   }, [route?.params?.initialSearch]);
 
-  // 🤖 [AI MODEL LOADER]
   const loadGenderModelAsync = async () => {
     if (!genderModelRef.current) {
         try {
             const asset = Asset.fromModule(require('../assets/gender_classification.tflite'));
             await asset.downloadAsync();
             genderModelRef.current = await loadTensorflowModel({ url: asset.localUri || asset.uri }, []);
-        } catch (e) { console.log('Model load error:', e); }
+        } catch (e) { }
     }
   };
 
-  // 🤖 [AI IMAGE PROCESSOR]
   const processImageForGender = async (uri) => {
     try {
         const faces = await FaceDetection.detect(uri);
@@ -107,10 +114,7 @@ export default function SearchSettingScreen({ route }) {
                 
                 const croppedFace = await ImageManipulator.manipulateAsync(
                     uri, 
-                    [
-                        { crop: { originX, originY, width: cWidth, height: cHeight } },
-                        { resize: { width: 224, height: 224 } } 
-                    ], 
+                    [{ crop: { originX, originY, width: cWidth, height: cHeight } }, { resize: { width: 224, height: 224 } }], 
                     { compress: 1, format: ImageManipulator.SaveFormat.JPEG }
                 );
                 
@@ -143,35 +147,42 @@ export default function SearchSettingScreen({ route }) {
     } catch (error) { return 'none'; }
   };
 
-  // 🤖 [BACKGROUND QUEUE PROCESSOR]
   useEffect(() => {
     let isActive = true;
     const processQueue = async () => {
         if (isQueueProcessingRef.current || scanQueueRef.current.length === 0) return;
+        
+        // 🚨 [NEW] মাস্টার থাম্বনেইল স্ক্যান অফ থাকলে স্কিপ করবে
+        if (!masterThumbScan) {
+            while(scanQueueRef.current.length > 0) {
+                const item = scanQueueRef.current.shift();
+                setThumbStates(prev => ({...prev, [item.id]: 'clean'}));
+            }
+            return;
+        }
+
         isQueueProcessingRef.current = true;
 
         while(scanQueueRef.current.length > 0 && isActive) {
-            const item = scanQueueRef.current.shift(); // লাইনের প্রথমটি নেওয়া হলো
-            
+            const item = scanQueueRef.current.shift(); 
             setThumbStates(prev => ({...prev, [item.id]: 'scanning'}));
 
             try {
-                // ছবি ডাউনলোড করা
                 const tempPath = `${FileSystem.cacheDirectory}thumb_search_${item.id}.jpg`;
                 await FileSystem.downloadAsync(item.url, tempPath);
                 
-                // স্ক্যান করা
                 const result = await processImageForGender(tempPath);
                 await FileSystem.deleteAsync(tempPath, { idempotent: true });
 
-                const needBlur = (result === 'w' || result === 'b');
+                // 🚨 [NEW] ইউজার সেটিংস থেকে টার্গেট আনা হচ্ছে
+                const target = global.appSettings?.aiBlurTarget || 'w';
+                const needBlur = (result === target || result === 'b');
+                
                 setThumbStates(prev => ({...prev, [item.id]: needBlur ? 'blur' : 'clean'}));
 
             } catch (error) {
-                setThumbStates(prev => ({...prev, [item.id]: 'clean'})); // এরর হলে ক্লিয়ার দেখাবে
+                setThumbStates(prev => ({...prev, [item.id]: 'clean'})); 
             }
-
-            // ডিভাইসকে একটু শান্ত হওয়ার সময় দেওয়া হচ্ছে
             await new Promise(resolve => setTimeout(resolve, 200)); 
         }
         isQueueProcessingRef.current = false;
@@ -179,12 +190,11 @@ export default function SearchSettingScreen({ route }) {
 
     const intervalId = setInterval(processQueue, 1000);
     return () => { isActive = false; clearInterval(intervalId); };
-  }, []);
+  }, [masterThumbScan]);
 
   const handleTextChange = async (text) => {
     setQuery(text);
     if (showResults) setShowResults(false);
-
     if (text.trim().length > 0) {
       try {
         const res = await fetch(`http://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=${encodeURIComponent(text)}`);
@@ -230,6 +240,14 @@ export default function SearchSettingScreen({ route }) {
     });
   };
 
+  // 🚨 [NEW] Thumbnail Quality Getter (Synced with Global & Home Screen)
+  const getDynamicThumbnail = (thumbnailObj, videoId) => {
+      if (masterThumbQuality === 'Data Saver' && videoId) return `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`;
+      if (!thumbnailObj || !thumbnailObj.thumbnails || thumbnailObj.thumbnails.length === 0) return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+      let bestImgUrl = thumbnailObj.thumbnails[thumbnailObj.thumbnails.length - 1].url;
+      return bestImgUrl.startsWith('//') ? 'https:' + bestImgUrl : bestImgUrl;
+  };
+
   const fetchSpecificVideoAndNavigate = async (targetId) => {
     setIsSearching(true);
     setSearchResults([]);
@@ -253,20 +271,20 @@ export default function SearchSettingScreen({ route }) {
         extractNodes(jsonData);
 
         if (foundVideo) {
-          const avatarUrl = foundVideo.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails?.[0]?.url;
+          const avatarUrl = getDynamicThumbnail(foundVideo.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail, null);
           const channelUrl = foundVideo.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url || '';
 
           const fullVideoData = {
             type: 'video', id: foundVideo.videoId, title: foundVideo.title?.runs?.[0]?.text,
             channel: foundVideo.ownerText?.runs?.[0]?.text, views: foundVideo.shortViewCountText?.simpleText || 'N/A',
             duration: foundVideo.lengthText?.simpleText || '', publishedTime: foundVideo.publishedTimeText?.simpleText || '',
-            thumbnail: foundVideo.thumbnail?.thumbnails?.[foundVideo.thumbnail.thumbnails.length - 1]?.url || `https://i.ytimg.com/vi/${foundVideo.videoId}/hqdefault.jpg`,
-            avatar: avatarUrl ? (avatarUrl.startsWith('//') ? 'https:' + avatarUrl : avatarUrl) : 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg',
+            thumbnail: getDynamicThumbnail(foundVideo.thumbnail, foundVideo.videoId),
+            avatar: avatarUrl ? avatarUrl : 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg',
             channelUrl: channelUrl
           };
           setIsSearching(false);
-          // 🚨 ভিডিও প্লেয়ারে যাওয়ার সময় ইউজারের সেট করা স্ক্যানিং অপশন পাঠানো হচ্ছে
-          const doScan = videoScanSettings[targetId] || false; 
+          
+          const doScan = masterVideoScan ? (videoScanSettings[targetId] !== false) : false; 
           navigation.replace('Player', { videoId: targetId, videoData: fullVideoData, aiScanEnabled: doScan });
           return;
         }
@@ -278,7 +296,7 @@ export default function SearchSettingScreen({ route }) {
   const fetchSearchResults = async (searchQuery) => {
     setIsSearching(true);
     setSearchResults([]);
-    scanQueueRef.current = []; // নতুন সার্চের সময় লাইন ক্লিয়ার করা হলো
+    scanQueueRef.current = []; 
     setThumbStates({});
 
     try {
@@ -294,11 +312,10 @@ export default function SearchSettingScreen({ route }) {
         const jsonData = JSON.parse(match[1]);
         const { finalFeed, nextToken, thumbQueue } = processYouTubeData(jsonData);
         
-        // 🤖 থাম্বনেইলগুলো লাইনে যোগ করা হচ্ছে
         const initialStates = {};
         thumbQueue.forEach(item => {
-            initialStates[item.id] = 'pending';
-            scanQueueRef.current.push(item);
+            initialStates[item.id] = masterThumbScan ? 'pending' : 'clean';
+            if (masterThumbScan) scanQueueRef.current.push(item);
         });
         setThumbStates(prev => ({...prev, ...initialStates}));
 
@@ -326,8 +343,8 @@ export default function SearchSettingScreen({ route }) {
       const initialStates = {};
       thumbQueue.forEach(item => {
           if (!thumbStates[item.id]) {
-              initialStates[item.id] = 'pending';
-              scanQueueRef.current.push(item);
+              initialStates[item.id] = masterThumbScan ? 'pending' : 'clean';
+              if (masterThumbScan) scanQueueRef.current.push(item);
           }
       });
       setThumbStates(prev => ({...prev, ...initialStates}));
@@ -367,10 +384,10 @@ export default function SearchSettingScreen({ route }) {
     extractNodes(jsonData);
 
     const finalFeed = [];
-    const thumbQueue = []; // 🤖 AI Queue এর জন্য এক্সট্রাক্ট করা হচ্ছে
+    const thumbQueue = []; 
 
     extractedChannels.forEach(ch => {
-      const avatarUrl = ch.thumbnail?.thumbnails?.[ch.thumbnail.thumbnails.length - 1]?.url || ch.thumbnail?.thumbnails?.[0]?.url || 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg';
+      const avatarUrl = getDynamicThumbnail(ch.thumbnail, null) || 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg';
       finalFeed.push({
         type: 'channel', id: ch.channelId, title: ch.title?.simpleText,
         avatar: avatarUrl.startsWith('//') ? 'https:' + avatarUrl : avatarUrl, 
@@ -384,9 +401,7 @@ export default function SearchSettingScreen({ route }) {
       const vidId = s.videoId;
       const title = s.headline?.simpleText || s.title?.simpleText || 'Shorts';
       if (vidId && title && !uniqueShortsMap.has(vidId)) {
-        let thumbUrl = `https://i.ytimg.com/vi/${vidId}/oardefault.jpg`;
-        if (s.thumbnail?.thumbnails?.length > 0) thumbUrl = s.thumbnail.thumbnails[0].url.split('?')[0]; 
-        
+        let thumbUrl = getDynamicThumbnail(s.thumbnail, vidId);
         uniqueShortsMap.set(vidId, { id: vidId, title: title, views: s.viewCountText?.simpleText || 'N/A', thumbnail: thumbUrl, type: 'short' });
         thumbQueue.push({ id: vidId, url: thumbUrl });
       }
@@ -398,8 +413,8 @@ export default function SearchSettingScreen({ route }) {
     const uniqueVideosMap = new Map();
     extractedVideos.forEach(v => {
       if (v.videoId && !uniqueVideosMap.has(v.videoId)) {
-        const thumbUrl = v.thumbnail?.thumbnails?.[v.thumbnail.thumbnails.length - 1]?.url;
-        const avatarUrl = v.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails?.[0]?.url;
+        const thumbUrl = getDynamicThumbnail(v.thumbnail, v.videoId);
+        const avatarUrl = getDynamicThumbnail(v.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail, null);
         
         uniqueVideosMap.set(v.videoId, {
           type: 'video', id: v.videoId, title: v.title?.runs?.[0]?.text,
@@ -425,7 +440,7 @@ export default function SearchSettingScreen({ route }) {
     Keyboard.dismiss();
     inputRef.current?.blur();
     setTimeout(() => {
-        const doScan = videoScanSettings[item.id] || false;
+        const doScan = masterVideoScan ? (videoScanSettings[item.id] !== false) : false;
         navigation.navigate('Player', { videoId: item.id, videoData: item, aiScanEnabled: doScan });
     }, 0);
   };
@@ -434,30 +449,30 @@ export default function SearchSettingScreen({ route }) {
     Keyboard.dismiss();
     inputRef.current?.blur();
     setTimeout(() => {
-        const doScan = videoScanSettings[short.id] || false;
-        navigation.navigate('Shorts', { initialVideoId: short.id, videoId: short.id, videoData: short, aiScanEnabled: doScan });
+        navigation.navigate('Shorts', { initialVideoId: short.id, videoId: short.id, videoData: short });
     }, 0);
   };
 
-  // 🤖 [THUMBNAIL RENDERER COMPONENT]
+  // 🤖 [FIXED] THUMBNAIL RENDERER - Always forces a dark overlay if blur fails
   const renderAiThumbnail = (itemUrl, itemId, isShort = false) => {
       const state = thumbStates[itemId] || 'pending';
-      const isDark = isDarkMode;
 
       if (state === 'pending' || state === 'scanning') {
           return (
-              <View style={[isShort ? styles.shortThumb : styles.thumbnail, { backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }]}>
-                  {state === 'scanning' ? <ActivityIndicator size="small" color="#00FF00" /> : <Ionicons name="scan-outline" size={30} color="#333" />}
+              <View style={[isShort ? styles.shortThumb : styles.thumbnail, { backgroundColor: '#111', justifyContent: 'center', alignItems: 'center' }]}>
+                  {state === 'scanning' ? <ActivityIndicator size="small" color="#00FF00" /> : <Ionicons name="scan-outline" size={30} color="#444" />}
               </View>
           );
       }
 
+      // 🚨 [FIXED] Force Black Overlay with "AI CENSORD" text just in case blurRadius misbehaves
       if (state === 'blur') {
           return (
-              <View style={[isShort ? styles.shortThumb : styles.thumbnail, { position: 'relative' }]}>
-                  <Image source={{ uri: itemUrl }} style={[StyleSheet.absoluteFillObject]} blurRadius={30} />
-                  <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' }]}>
-                      <Ionicons name="eye-off" size={isShort ? 30 : 40} color="rgba(255,255,255,0.7)" />
+              <View style={[isShort ? styles.shortThumb : styles.thumbnail, { position: 'relative', overflow: 'hidden' }]}>
+                  <Image source={{ uri: itemUrl }} style={[StyleSheet.absoluteFillObject]} blurRadius={Platform.OS === 'ios' ? 20 : 40} />
+                  <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' }]}>
+                      <Ionicons name="eye-off" size={isShort ? 30 : 40} color="rgba(255,255,255,0.9)" />
+                      <Text style={{color: '#FFF', fontSize: 10, marginTop: 4, fontWeight: 'bold'}}>AI CENSORD</Text>
                   </View>
               </View>
           );
@@ -475,9 +490,7 @@ export default function SearchSettingScreen({ route }) {
             <Text style={styles.shelfTitle}>{__translate('Shorts')}</Text>
           </View>
           <FlatList 
-            horizontal 
-            showsHorizontalScrollIndicator={false} 
-            data={item.shorts} 
+            horizontal showsHorizontalScrollIndicator={false} data={item.shorts} 
             keyExtractor={(short, index) => short.id + '_' + index.toString()} 
             renderItem={({item: short}) => (
               <View style={styles.shortCardWrapper}>
@@ -488,14 +501,7 @@ export default function SearchSettingScreen({ route }) {
                       <Text style={styles.shortViews}>{short.views}</Text>
                     </View>
                   </TouchableOpacity>
-                  {/* 🚨 Shorts এর জন্য Video AI Scan টগল */}
-                  <TouchableOpacity 
-                      style={[styles.aiScanToggleBtn, { backgroundColor: videoScanSettings[short.id] ? '#00BFA5' : '#444' }]} 
-                      onPress={() => toggleVideoScan(short.id)}
-                  >
-                      <Ionicons name={videoScanSettings[short.id] ? "scan-outline" : "scan"} size={14} color="#FFF" />
-                      <Text style={styles.aiScanToggleText}>{videoScanSettings[short.id] ? 'AI Scan: ON' : 'AI Scan: OFF'}</Text>
-                  </TouchableOpacity>
+                  {/* 🚨 [REMOVED] Shorts-এর নিচে থাকা AI Scan বাটন মুছে দেওয়া হয়েছে */}
               </View>
           )} />
         </View>
@@ -503,6 +509,7 @@ export default function SearchSettingScreen({ route }) {
     }
 
     if (item.type === 'video') {
+      const isScanOn = videoScanSettings[item.id] !== false; // Default true if master is ON
       return (
         <View style={styles.videoCard}>
           <TouchableOpacity activeOpacity={0.9} onPress={() => navigateToPlayer(item)}>
@@ -516,17 +523,18 @@ export default function SearchSettingScreen({ route }) {
               <Text style={styles.videoMeta}>{item.channel} • {item.views} • {item.publishedTime}</Text>
             </View>
             
-            {/* 🚨 Video এর জন্য AI Scan টগল */}
-            <TouchableOpacity 
-                style={[styles.videoAiScanToggle, { borderColor: videoScanSettings[item.id] ? '#00BFA5' : '#555' }]} 
-                onPress={() => toggleVideoScan(item.id)}
-            >
-                <Ionicons name="hardware-chip-outline" size={16} color={videoScanSettings[item.id] ? '#00BFA5' : '#888'} />
-                <Text style={{ fontSize: 10, color: videoScanSettings[item.id] ? '#00BFA5' : '#888', marginTop: 2, fontWeight: 'bold' }}>
-                    {videoScanSettings[item.id] ? 'SCAN ON' : 'SCAN OFF'}
-                </Text>
-            </TouchableOpacity>
-
+            {/* 🚨 [NEW] Master Video Scan অন থাকলেই কেবল এই বাটনটি দেখাবে */}
+            {masterVideoScan && (
+                <TouchableOpacity 
+                    style={[styles.videoAiScanToggle, { borderColor: isScanOn ? '#00BFA5' : '#555' }]} 
+                    onPress={() => toggleVideoScan(item.id)}
+                >
+                    <Ionicons name="hardware-chip-outline" size={16} color={isScanOn ? '#00BFA5' : '#888'} />
+                    <Text style={{ fontSize: 10, color: isScanOn ? '#00BFA5' : '#888', marginTop: 2, fontWeight: 'bold' }}>
+                        {isScanOn ? 'SCAN ON' : 'SCAN OFF'}
+                    </Text>
+                </TouchableOpacity>
+            )}
           </View>
         </View>
       );
@@ -645,8 +653,6 @@ function getDynamicStyles(isDark) {
     shortOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 8, backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.08)' },
     shortTitle: { color: isDark ? '#FFF' : '#000', fontSize: 13, fontWeight: 'bold', marginBottom: 2 },
     shortViews: { color: isDark ? '#CCC' : '#666', fontSize: 11 },
-    aiScanToggleBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 8, paddingVertical: 4, paddingHorizontal: 10, borderRadius: 20, width: '90%' },
-    aiScanToggleText: { color: '#FFF', fontSize: 10, fontWeight: 'bold', marginLeft: 4 },
     channelRow: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: isDark ? '#222' : '#e6e6e6' },
     channelBigAvatar: { width: 60, height: 60, borderRadius: 30, backgroundColor: isDark ? '#333' : '#ccc' },
     channelTitleMain: { color: isDark ? '#FFF' : '#000', fontSize: 16, fontWeight: 'bold' },
