@@ -511,15 +511,29 @@ export default function ChannelScreen() {
         </View>
 
         <View style={{ justifyContent: 'center', marginLeft: 10 }}>
-          <TouchableOpacity 
-              style={[styles.videoAiScanToggle, { borderColor: isScanOn ? '#00BFA5' : (isDarkMode ? '#444' : '#CCC') }]} 
-              onPress={() => toggleVideoScan(item.id)}
-          >
-              <Ionicons name="hardware-chip-outline" size={16} color={isScanOn ? '#00BFA5' : (isDarkMode ? '#888' : '#999')} />
-              <Text style={{ fontSize: 9, color: isScanOn ? '#00BFA5' : (isDarkMode ? '#888' : '#999'), marginTop: 2, fontWeight: 'bold' }}>
-                  {isScanOn ? 'SCAN ON' : 'SCAN OFF'}
-              </Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <TouchableOpacity 
+                style={[styles.videoAiScanToggle, { borderColor: isScanOn ? '#00BFA5' : (isDarkMode ? '#444' : '#CCC') }]} 
+                onPress={() => toggleVideoScan(item.id)}
+            >
+                <Ionicons name="hardware-chip-outline" size={16} color={isScanOn ? '#00BFA5' : (isDarkMode ? '#888' : '#999')} />
+                <Text style={{ fontSize: 9, color: isScanOn ? '#00BFA5' : (isDarkMode ? '#888' : '#999'), marginTop: 2, fontWeight: 'bold' }}>
+                    {isScanOn ? 'SCAN ON' : 'SCAN OFF'}
+                </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+            style={{ padding: 6, borderRadius: 8, borderWidth: 1, borderColor: '#00BFA5', alignItems: 'center', justifyContent: 'center', width: 60, marginLeft: 8 }}
+            onPress={() => {
+                DeviceEventEmitter.emit('triggerDownloadOverlay', { videoId: item.id || item.videoId, title: item.title, thumbnail: item.thumbnail });
+            }}
+            >
+                <Ionicons name="download-outline" size={16} color="#00BFA5" />
+                <Text style={{ fontSize: 9, color: '#00BFA5', marginTop: 2, fontWeight: 'bold' }}>
+                    DOWNLOAD
+                </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </TouchableOpacity>
     );
