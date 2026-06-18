@@ -117,7 +117,7 @@ export default function GlobalPlayer() {
 
   const scanIntervalRef = useRef(3.0);
   const blurTargetRef = useRef('w');
-  const lowStreamUrlRef = useRef(null); // 🚨
+  const lowStreamUrlRef = useRef(null); 
 
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const isAudioModeRef = useRef(false);
@@ -277,7 +277,6 @@ export default function GlobalPlayer() {
     } catch (error) {}
   };
 
-  // 🚨 [NEW] সার্ভারের পাইপকে ট্রিগার করার জন্য ফাংশন
   const startAiPipe = async (time) => {
       if (!lowStreamUrlRef.current) return;
       try {
@@ -287,7 +286,6 @@ export default function GlobalPlayer() {
 
   const seekTo = async (newTime) => {
       setCurrentTime(newTime); 
-      // 🚨 যখনই ইউজার ভিডিও টানবে, সাথে সাথে পাইপ রিস্টার্ট হবে
       targetScanSecRef.current = parseFloat(newTime.toFixed(1));
       startAiPipe(targetScanSecRef.current);
 
@@ -441,7 +439,6 @@ export default function GlobalPlayer() {
           if (json.lowQualityUrl) {
               setLowStreamUrl(json.lowQualityUrl); 
               lowStreamUrlRef.current = json.lowQualityUrl;
-              // 🚨 ভিডিও লোড হলেই প্রথম পাইপ চালু হবে
               startAiPipe(0);
           }
           
@@ -494,13 +491,24 @@ export default function GlobalPlayer() {
                   const box = face.frame || face.bounds || {}; 
                   
                   let padding = 20; 
-                  let originX = Math.floor(Math.max(0, (box.left ?? box.x ?? box.originX ?? 0) - padding / 2));
+                  // 🚨 [FIXED] সমান প্যাডিং দিয়ে স্কয়ার শেপ তৈরি করা হলো
+                  let faceWidth = box.width ?? 0;
+                  let faceHeight = box.height ?? 0;
+
+                  let originX = Math.floor(Math.max(0, (box.left ?? box.x ?? box.originX ?? 0) - padding));
                   let originY = Math.floor(Math.max(0, (box.top ?? box.y ?? box.originY ?? 0) - padding));
-                  let width = Math.floor(Math.max(10, (box.width ?? 0) + padding));
-                  let height = Math.floor(Math.max(10, (box.height ?? 0) + padding * 1.5)); 
                   
+                  let width = Math.floor(Math.max(10, faceWidth + padding * 2));
+                  let height = Math.floor(Math.max(10, faceHeight + padding * 2)); 
+                  
+                  // 🚨 [FIXED] এখানে crop করার পাশাপাশি ছবিটিকে 224x224 পিক্সেলে Resize করা হলো
                   const croppedFace = await ImageManipulator.manipulateAsync(
-                      uri, [{ crop: { originX, originY, width, height } }], { compress: 1, format: ImageManipulator.SaveFormat.JPEG }
+                      uri, 
+                      [
+                          { crop: { originX, originY, width, height } },
+                          { resize: { width: 224, height: 224 } } // 🚨 যুক্ত করা লাইন 
+                      ], 
+                      { compress: 1, format: ImageManipulator.SaveFormat.JPEG }
                   );
                   
                   await loadGenderModelAsync();
@@ -521,7 +529,8 @@ export default function GlobalPlayer() {
                   const output = await genderModelRef.current.run([pureInputBuffer]);
                   let probability = output && output.length > 0 ? new Float32Array(output[0])[0] : 0;
                   
-                  if (probability >= 0.35) { hasFemale = true; } 
+                  // 🚨 [FIXED] থ্রেশহোল্ড 0.35 থেকে বাড়িয়ে 0.50 করা হলো
+                  if (probability >= 0.50) { hasFemale = true; } 
                   else { hasMale = true; }
               }
               
@@ -567,7 +576,6 @@ export default function GlobalPlayer() {
 
               isAiProcessingRef.current = true;
               try {
-                  // 🚨 নতুন সার্ভার রাউট (Pipe Frame) থেকে ফ্রেম নেওয়া হচ্ছে
                   const response = await fetch(`${MY_API_SERVER}/api/get-pipe-frame?time=${targetSec}`);
                   const data = await response.json();
 
@@ -588,7 +596,6 @@ export default function GlobalPlayer() {
                       await FileSystem.deleteAsync(tempLocalPath, { idempotent: true });
                       targetScanSecRef.current = parseFloat((targetSec + scanIntervalRef.current).toFixed(1));
                   } else if (data.status === 'processing') {
-                      // ফ্রেম রেডি না হলে একটু অপেক্ষা করবে, নতুন প্রসেস চালু করবে না
                       await new Promise(r => setTimeout(r, 200));
                   } else {
                       await new Promise(r => setTimeout(r, 500));
@@ -661,7 +668,6 @@ export default function GlobalPlayer() {
                     setCurrentTime(player.currentTime);
                     if (player.duration > 0) setDuration(player.duration);
 
-                    // 🚨 [DYNAMIC CENSOR LOGIC]
                     let activeKey = 0;
                     const keys = Object.keys(aiDataMapRef.current).map(Number).sort((a,b) => a - b);
                     for (let i = 0; i < keys.length; i++) {
@@ -680,7 +686,7 @@ export default function GlobalPlayer() {
                 }
             }
         }
-    }, 200); // 🚨 Fast UI Update for perfect blur timing
+    }, 200); 
     return () => clearInterval(interval);
   }, [player, streamMode, isAudioMode, videoSource]);
 
@@ -784,7 +790,6 @@ export default function GlobalPlayer() {
 
   const bufferedWidth = duration > 0 ? `${(buffered / duration) * 100}%` : '0%';
   
-  // 🚨 AI Menus Config
   const timeOptions = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.5, 2.0, 2.5, 3.0];
   const blurOptions = [{label: 'Man', value: 'm'}, {label: 'Woman', value: 'w'}];
 
@@ -1022,7 +1027,6 @@ export default function GlobalPlayer() {
                                 scanIntervalRef.current = t;
                                 await AsyncStorage.setItem('ai_interval', t.toString());
                                 setShowAiTimeMenu(false);
-                                // 🚨 সেটিংস বদলালেই নতুন টাইমে পাইপ রিস্টার্ট হবে
                                 targetScanSecRef.current = parseFloat(currentTime.toFixed(1));
                                 startAiPipe(targetScanSecRef.current);
                             }}>
