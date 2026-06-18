@@ -21,6 +21,9 @@ import { loadTensorflowModel } from 'react-native-fast-tflite';
 
 LogBox.ignoreLogs(['Video component', 'expo-audio', 'expo-video']);
 
+// 🚨 FIX: ফাইলটি একদম উপরে গ্লোবালি রিকোয়ার করা হলো! যাতে অ্যাপ চালুর সাথে সাথেই মেট্রো এটি চিনে নেয়।
+const GENDER_MODEL_ASSET = require('../assets/gender_classification.tflite');
+
 const windowDim = Dimensions.get('window');
 const PORTRAIT_WIDTH = Math.min(windowDim.width, windowDim.height);
 const PORTRAIT_HEIGHT = Math.max(windowDim.width, windowDim.height);
@@ -196,7 +199,7 @@ export default function GlobalPlayer() {
     const appStateSub = AppState.addEventListener('change', async (nextAppState) => {
         if (nextAppState.match(/inactive|background/)) {
             if (!isAudioModeRef.current) {
-                // Background video pause is removed for continuous background audio
+                // Background video pause logic
             }
         }
     });
@@ -485,7 +488,8 @@ export default function GlobalPlayer() {
   const loadGenderModelAsync = async () => {
       if (!genderModelRef.current) {
           try {
-              const asset = Asset.fromModule(require('../assets/gender_classification.tflite'));
+              // 🚨 FIX: গ্লোবাল ভ্যারিয়েবল থেকে মডেল লোড করা হচ্ছে!
+              const asset = Asset.fromModule(GENDER_MODEL_ASSET);
               await asset.downloadAsync();
               genderModelRef.current = await loadTensorflowModel({ url: asset.localUri || asset.uri }, []);
               console.log("[AI Debug] TFLite Model loaded successfully!");
@@ -516,12 +520,11 @@ export default function GlobalPlayer() {
                   let width = Math.floor(Math.max(10, (box.width ?? 0) + padding));
                   let height = Math.floor(Math.max(10, (box.height ?? 0) + padding * 1.5)); 
                   
-                  // 🚨 FIX 1: TFLite মডেলের রিকোয়ারমেন্ট অনুযায়ী ঠিক 224x224 সাইজে রিসাইজ করা হলো!
                   const croppedFace = await ImageManipulator.manipulateAsync(
                       uri, 
                       [
                           { crop: { originX, originY, width, height } },
-                          { resize: { width: 224, height: 224 } } // <-- এটি মিসিং ছিল!
+                          { resize: { width: 224, height: 224 } } 
                       ], 
                       { compress: 1, format: ImageManipulator.SaveFormat.JPEG }
                   );
@@ -541,7 +544,7 @@ export default function GlobalPlayer() {
 
                   let rgbIndex = 0;
                   for (let j = 0; j < rawImageData.data.length; j += 4) {
-                      if (rgbIndex >= 224 * 224 * 3) break; // 🚨 FIX 2: Buffer overflow Safety
+                      if (rgbIndex >= 224 * 224 * 3) break; 
                       inputData[rgbIndex++] = rawImageData.data[j] / 255.0;     
                       inputData[rgbIndex++] = rawImageData.data[j + 1] / 255.0; 
                       inputData[rgbIndex++] = rawImageData.data[j + 2] / 255.0; 
@@ -572,7 +575,6 @@ export default function GlobalPlayer() {
           console.log(`[AI Debug] FINAL RESULT: None`);
           return 'none';
       } catch (error) { 
-          // 🚨 FIX 3: Error catch করা হচ্ছে যাতে সাইলেন্ট ফেইল না হয়
           console.log("[AI Debug] FATAL ERROR IN AI PROCESS:", error);
           return 'none'; 
       }
@@ -617,7 +619,6 @@ export default function GlobalPlayer() {
 
                   if (data.success && data.frameUrl) {
                       const tempLocalPath = `${FileSystem.cacheDirectory}temp_frame_${targetSec}.jpg`;
-                      // 🚨 FIX 4: Safety checking for file path
                       const downloadResult = await FileSystem.downloadAsync(data.frameUrl, tempLocalPath);
                       
                       const result = await processFrameForGender(downloadResult.uri);
