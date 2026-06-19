@@ -154,7 +154,6 @@ export default function GlobalPlayer() {
       };
       loadAiSettings();
 
-      // 🚨 [INSTANT SYNC] - Settings Screen থেকে পরিবর্তন হলে সাথে সাথে কাজ করবে
       const targetSub = DeviceEventEmitter.addListener('aiBlurTargetChanged', (newTarget) => {
           setBlurTarget(newTarget);
           blurTargetRef.current = newTarget;
@@ -175,13 +174,21 @@ export default function GlobalPlayer() {
       return () => { targetSub.remove(); scanSub.remove(); };
   }, []);
 
+  // 🚨 [UPDATED]: Maximum Background Support for Expo Audio
   useEffect(() => {
     const setupAudio = async () => {
       try {
         await setAudioModeAsync({
-          staysActiveInBackground: true, playsInSilentModeIOS: true, shouldDuckAndroid: true, playThroughEarpieceAndroid: false,
+          staysActiveInBackground: true, // ব্যাকগ্রাউন্ডে চলতে সাহায্য করবে
+          playsInSilentModeIOS: true,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
+          interruptionModeIOS: 1, 
+          interruptionModeAndroid: 1, 
         });
-      } catch (e) {}
+      } catch (e) {
+          console.log("Audio Setup Error:", e);
+      }
     };
     setupAudio();
   }, []);
@@ -206,12 +213,17 @@ export default function GlobalPlayer() {
     controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 4000);
   };
 
+  // 🚨 [UPDATED]: Background AppState Management
   useEffect(() => {
     const appStateSub = AppState.addEventListener('change', async (nextAppState) => {
         if (nextAppState.match(/inactive|background/)) {
             if (!isAudioModeRef.current) {
+                // ভিডিও মোডে থাকলে অ্যাপ মিনিমাইজ করলে পজ হবে
                 if (player && player.playing) player.pause();
                 if (syncAudioRef.current && syncAudioRef.current.playing) syncAudioRef.current.pause();
+            } else {
+                // অডিও মোডে থাকলে চলতে থাকবে 
+                console.log("Background Audio Playing...");
             }
         }
     });
@@ -309,6 +321,19 @@ export default function GlobalPlayer() {
       const scanStatus = data.aiScanEnabled || false;
       setAiScanEnabled(scanStatus);
       aiScanEnabledRef.current = scanStatus;
+
+      try {
+          const historyStr = await AsyncStorage.getItem('userHistory');
+          let history = historyStr ? JSON.parse(historyStr) : [];
+          history = history.filter(item => item.id !== data.videoId);
+          const historyItem = {
+              id: data.videoId, title: data.videoData?.title || 'Unknown Title', channel: data.videoData?.channel || 'Unknown Channel',
+              date: new Date().toLocaleDateString() + ' • ' + new Date().toLocaleTimeString(), thumbnail: data.videoData?.thumbnail || `https://i.ytimg.com/vi/${data.videoId}/hqdefault.jpg`,
+          };
+          history.unshift(historyItem);
+          if (history.length > 200) history = history.slice(0, 200); 
+          await AsyncStorage.setItem('userHistory', JSON.stringify(history));
+      } catch (error) {}
 
       if (currentVideoIdRef.current === data.videoId) {
           setPlayerState('full');
@@ -494,12 +519,17 @@ export default function GlobalPlayer() {
                   }
 
                   const output = await genderModelRef.current.run([pureInputBuffer]);
-                  let probability = output && output.length > 0 ? new Float32Array(output[0])[0] : 0;
                   
-                  if (probability >= 0.50) { hasFemale = true; } 
-                  else { hasMale = true; }
+                  if (output && output.length > 0) {
+                      const outArray = new Float32Array(output[0]);
+                      if (outArray.length > 1) {
+                          if (outArray[0] > outArray[1]) { hasFemale = true; } else { hasMale = true; }
+                      } else {
+                          let probability = outArray[0];
+                          if (probability < 0.50) { hasFemale = true; } else { hasMale = true; }
+                      }
+                  }
               }
-              
               if (hasFemale && hasMale) return 'b'; 
               if (hasFemale) return 'w';
               if (hasMale) return 'm';
