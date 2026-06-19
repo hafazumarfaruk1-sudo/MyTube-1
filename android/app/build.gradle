@@ -181,6 +181,6 @@ dependencies {
     }
 
     // 🚨 [NEW] YouTube-DL Android Library (ইঞ্জিন যুক্ত করা হলো)
-    implementation 'com.github.yausername.youtubedl-android:library:0.16.+'
-    implementation 'com.github.yausername.youtubedl-android:ffmpeg:0.16.+'
+    implementation 'com.github.yausername.youtubedl-android:library:0.14.0'
+    implementation 'com.github.yausername.youtubedl-android:ffmpeg:0.14.0'
 }
