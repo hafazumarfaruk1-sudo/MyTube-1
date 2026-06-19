@@ -96,7 +96,12 @@
           }
         }
       ],
-      "expo-audio",
+      [
+        "expo-audio",
+        {
+          "enableBackgroundAudio": true
+        }
+      ],
       [
         "expo-video",
         {
@@ -115,4 +120,4 @@
       }
     }
   }
-} 
+}
