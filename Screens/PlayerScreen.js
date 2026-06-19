@@ -24,6 +24,10 @@ export default function PlayerScreen({ route, navigation }) {
   const [relatedVideos, setRelatedVideos] = useState([]);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isSubscribed, setIsSubscribed] = useState(false);
+  
+  // 🚨 [NEW] প্লেলিস্টে সেভ আছে কি না তার স্টেট
+  const [isInPlaylist, setIsInPlaylist] = useState(false);
+
   const [isInitialLoading, setIsInitialLoading] = useState(true);
 
   const [showDescModal, setShowDescModal] = useState(false);
@@ -51,12 +55,21 @@ export default function PlayerScreen({ route, navigation }) {
   );
 
   useEffect(() => {
-    checkSubscriptionStatus(); fetchRelatedVideos(false);
+    checkSubscriptionStatus(); 
+    fetchRelatedVideos(false);
+    
     if (videoId && videoData) {
         DeviceEventEmitter.emit('playVideo', { videoId: videoId, videoData: videoData, aiScanEnabled: aiScanEnabled });
         
-        setIsAudioMode(videoData?.type === 'audio'); setIsInitialLoading(true);
-        setLiveAvatar(null); setDescription(''); setComments([]); setCommentReplies({}); setCommentNextToken(null);
+        setIsAudioMode(videoData?.type === 'audio'); 
+        setIsInitialLoading(true);
+        setLiveAvatar(null); 
+        setDescription(''); 
+        setComments([]); 
+        setCommentReplies({}); 
+        setCommentNextToken(null);
+        
+        checkPlaylistStatus(); // 🚨 [NEW] ভিডিও লোড হলেই চেক করবে এটা প্লেলিস্টে আছে কি না
 
         fetch(`${MY_API_SERVER}/api/video-details?videoId=${videoId}`)
             .then(res => res.json())
@@ -87,6 +100,51 @@ export default function PlayerScreen({ route, navigation }) {
       await AsyncStorage.setItem('subscribedChannels', JSON.stringify(subs));
       setIsSubscribed(!exists);
     } catch (e) {}
+  };
+
+  // 🚨 [NEW] প্লেলিস্ট স্ট্যাটাস চেক ফাংশন
+  const checkPlaylistStatus = async () => {
+      try {
+          const playlistStr = await AsyncStorage.getItem('my_saved_playlist');
+          if (playlistStr) {
+              const playlist = JSON.parse(playlistStr);
+              setIsInPlaylist(playlist.some(v => v.id === videoId));
+          } else {
+              setIsInPlaylist(false);
+          }
+      } catch (e) { console.error(e); }
+  };
+
+  // 🚨 [NEW] প্লেলিস্টে যোগ বা রিমুভ করার ফাংশন
+  const togglePlaylist = async () => {
+      try {
+          const playlistStr = await AsyncStorage.getItem('my_saved_playlist');
+          let playlist = playlistStr ? JSON.parse(playlistStr) : [];
+          const exists = playlist.some(v => v.id === videoId);
+
+          if (exists) {
+              // আগে থেকে থাকলে রিমুভ করে দেবে
+              playlist = playlist.filter(v => v.id !== videoId);
+              setIsInPlaylist(false);
+              Alert.alert(t('Success'), t('Removed from playlist!'));
+          } else {
+              // না থাকলে নতুন করে যুক্ত করবে (টাইটেল, থাম্বনেইল, সময় সহ)
+              playlist.unshift({
+                  id: videoId,
+                  title: videoData?.title || 'Unknown Video',
+                  thumbnail: videoData?.thumbnail || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+                  duration: videoData?.duration || '',
+                  channel: videoData?.channel || 'YouTube',
+                  views: videoData?.views || '',
+                  publishedTime: videoData?.publishedTime || ''
+              });
+              setIsInPlaylist(true);
+              Alert.alert(t('Success'), t('Added to playlist!'));
+          }
+          await AsyncStorage.setItem('my_saved_playlist', JSON.stringify(playlist));
+      } catch (e) {
+          console.error("Playlist Error:", e);
+      }
   };
 
   const handleBackgroundPlay = () => {
@@ -251,6 +309,14 @@ export default function PlayerScreen({ route, navigation }) {
               <Ionicons name={isAudioMode ? "headset" : "headset-outline"} size={18} color={isAudioMode ? "#00BFA5" : (isDarkMode ? '#FFF' : '#111')} />
               <Text style={[styles.actionPillText, isAudioMode && {color: '#00BFA5'}]}>{t('Audio')}</Text>
           </TouchableOpacity>
+
+          {/* 🚨 [NEW] Add to Playlist Button */}
+          {!videoData.localUri && (
+              <TouchableOpacity style={styles.actionPill} onPress={togglePlaylist}>
+                  <Ionicons name={isInPlaylist ? "bookmark" : "bookmark-outline"} size={18} color={isInPlaylist ? "#00BFA5" : (isDarkMode ? '#FFF' : '#111')} />
+                  <Text style={[styles.actionPillText, isInPlaylist && {color: '#00BFA5'}]}>{isInPlaylist ? t('Saved') : t('Save')}</Text>
+              </TouchableOpacity>
+          )}
 
           {!videoData.localUri && (
               <TouchableOpacity style={styles.actionPill} onPress={openDownloadWindow}>
