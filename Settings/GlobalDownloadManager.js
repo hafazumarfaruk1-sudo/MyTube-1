@@ -56,7 +56,7 @@ export default function GlobalDownloadManager() {
             const safeTitle = data.title.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30);
             const fileUri = `${FileSystem.documentDirectory}${safeTitle}_${data.id}.${fileExt}`;
 
-<<<<<<< HEAD
+
                 const currentActiveIds = Object.keys(active).filter(k => {
                     const ai = active[k];
                     const progressVal = parseFloat(ai.progress) || 0;
@@ -65,7 +65,7 @@ export default function GlobalDownloadManager() {
                     return true;
                 });
                 setActiveCount(currentActiveIds.length);
-=======
+
             // UI-তে ইনস্ট্যান্ট দেখানো হচ্ছে
             setDownloads(prev => [{
                 id: data.id, videoId: data.videoId, title: data.title, thumbnail: data.thumbnail,
