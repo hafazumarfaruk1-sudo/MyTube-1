@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView, Image, DeviceEventEmitter, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView, Image, DeviceEventEmitter, Alert, NativeModules } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../ThemeContext';
 import { useLanguage } from '../LanguageContext';
+
+// 🚨 VideoProcessor ইমপোর্ট করা হলো
+import { processExtractedData } from '../VideoProcessor';
 
 const MY_API_SERVER = "http://127.0.0.1:10000";
 
@@ -32,18 +35,26 @@ export default function GlobalDownloadOverlay() {
 
   const removeRequest = (id) => setDownloadRequests(prev => prev.filter(r => r.id !== id));
 
+  // 🚨 আপডেট করা fetchDownloadLinks ফাংশন
   const fetchDownloadLinks = async (id, videoId, type = 'video') => {
     try {
       const targetUrl = `https://www.youtube.com/watch?v=${videoId}`;
-      const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(targetUrl)}&action=download&type=${type}`;
-      const response = await fetch(apiUrl);
-      const data = await response.json();
-      setDownloadRequests(prev => prev.map(r => r.id === id ? { ...r, downloadLinks: data.success && data.availableLinks ? data.availableLinks : [], step: 'list' } : r));
-      if (!data.success) {
-        // keep list empty but show user a toast/alert
-        // Alert.alert('No links', 'No download links found for this video.');
-      }
+      
+      // 🚨 লোকাল সার্ভারের বদলে নেটিভ ইঞ্জিন কল করা হচ্ছে
+      const rawJsonString = await NativeModules.YtDlpModule.extractVideoInfo(targetUrl);
+      
+      // 🚨 VideoProcessor দিয়ে কাঁচা ডেটাকে সুন্দর করা হচ্ছে
+      const data = processExtractedData(rawJsonString, type === 'audio' ? 'audio' : 'download');
+
+      setDownloadRequests(prev => prev.map(r => r.id === id ? { 
+          ...r, 
+          // অডিও হলে availableAudio, ভিডিও হলে availableLinks
+          downloadLinks: (type === 'audio' ? data.availableAudio : data.availableLinks) || [], 
+          step: 'list' 
+      } : r));
+
     } catch (e) {
+      console.error("Extraction Error:", e);
       setDownloadRequests(prev => prev.map(r => r.id === id ? { ...r, downloadLinks: [], step: 'list' } : r));
     }
   };
@@ -86,6 +97,8 @@ export default function GlobalDownloadOverlay() {
       const safeTitle = (videoData.title || 'video').replace(/[<>:"\/\\|?*]+/g, '').trim();
       const targetUrl = `https://www.youtube.com/watch?v=${videoData.videoId}`;
       const thumbUrl = videoData.thumbnail || `https://i.ytimg.com/vi/${videoData.videoId}/hqdefault.jpg`;
+      
+      // ⚠️ এখানে aria-download কল আছে, যা আমরা পরবর্তীতে expo-file-system দিয়ে রিপ্লেস করব
       const dlApiUrl = `${MY_API_SERVER}/api/aria-download?id=${downloadId}&videoId=${videoData.videoId}&url=${encodeURIComponent(targetUrl)}&quality=${encodeURIComponent(item.quality)}&type=${downloadType}&title=${encodeURIComponent(safeTitle)}&thumbnail=${encodeURIComponent(thumbUrl)}`;
       await fetch(dlApiUrl);
     } catch (e) {
