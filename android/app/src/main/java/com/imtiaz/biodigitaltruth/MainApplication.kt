@@ -17,8 +17,9 @@ import com.facebook.react.defaults.DefaultReactNativeHost
 import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ReactNativeHostWrapper
 
-// 🚨 YoutubeDL ইমপোর্ট
+// 🚨 YoutubeDL এবং FFmpeg ইমপোর্ট
 import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.ffmpeg.FFmpeg // 👈 FFmpeg ইমপোর্ট যুক্ত করা হয়েছে
 
 class MainApplication : Application(), ReactApplication {
 
@@ -43,9 +44,10 @@ class MainApplication : Application(), ReactApplication {
   override fun onCreate() {
     super.onCreate()
     
-    // 🚨 yt-dlp initialization (অ্যাপ চালুর সাথে সাথে ইঞ্জিন স্টার্ট)
+    // 🚨 yt-dlp এবং FFmpeg initialization (অ্যাপ চালুর সাথে সাথে ইঞ্জিন স্টার্ট)
     try {
         YoutubeDL.getInstance().init(this)
+        FFmpeg.getInstance().init(this) // 👈 FFmpeg এখানে চালু করা হলো
         Log.d("YoutubeDL", "Initialized successfully")
     } catch (e: Exception) {
         Log.e("YoutubeDL", "Failed to initialize", e)
