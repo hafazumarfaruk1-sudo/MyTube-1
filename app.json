@@ -111,13 +111,12 @@
       "expo-web-browser",
       "expo-font",
       "expo-asset",
-      "react-native-fast-tflite",
-      "expo-status-bar"
+      "react-native-fast-tflite"
     ],
     "extra": {
       "expo-navigation-bar": {},
       "eas": {
-        "projectId": "82863962-ee52-4aca-87ca-cd6453b84944"
+        "projectId": "6ec4432c-d5d5-4148-92df-3eb61481280c"
       }
     }
   }
