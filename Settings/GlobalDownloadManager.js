@@ -73,7 +73,7 @@ export default function GlobalDownloadManager() {
                 progress: '0.0', speed: 'Connecting...', eta: '--:--',
                 isCompleted: false, localUri: fileUri, isError: false
             }, ...prev]);
->>>>>>> a9e815df9a56633ed9005d87d7d85ad2bc48a645
+ a9e815df9a56633ed9005d87d7d85ad2bc48a645
 
             setIsBadgeVisible(true);
             Animated.spring(pan, { toValue: { x: 20, y: SCREEN_HEIGHT - 150 }, useNativeDriver: false }).start();
@@ -118,7 +118,7 @@ export default function GlobalDownloadManager() {
 
             activeDownloadsRef.current[data.id] = downloadResumable;
 
-<<<<<<< HEAD
+
                     Object.keys(active).forEach(id => {
                         const activeItem = active[id];
                         const existsIndex = updatedList.findIndex(d => d.id === id);
@@ -166,7 +166,7 @@ export default function GlobalDownloadManager() {
 
                     if (needsSave) AsyncStorage.setItem('recorded_downloads', JSON.stringify(updatedList)).catch(()=>{});
                     return updatedList;
-=======
+
             try {
                 const { uri } = await downloadResumable.downloadAsync();
                 // 🚨 ডাউনলোড সফল!
@@ -176,7 +176,7 @@ export default function GlobalDownloadManager() {
                     );
                     AsyncStorage.setItem('recorded_downloads', JSON.stringify(newList));
                     return newList;
->>>>>>> a9e815df9a56633ed9005d87d7d85ad2bc48a645
+ a9e815df9a56633ed9005d87d7d85ad2bc48a645
                 });
                 delete activeDownloadsRef.current[data.id];
             } catch (e) {
