@@ -18,6 +18,10 @@ import { Asset } from 'expo-asset';
 import FaceDetection from '@react-native-ml-kit/face-detection';
 import { loadTensorflowModel } from 'react-native-fast-tflite';
 
+// 🚨 [NEW] নেটিভ ইঞ্জিন এবং ভিডিও প্রসেসর ইমপোর্ট
+import { NativeModules } from 'react-native';
+import { processExtractedData } from '../VideoProcessor'; // পাথটি ফোল্ডার অনুযায়ী ঠিক আছে কিনা দেখে নেবেন
+
 LogBox.ignoreLogs(['Video component', 'expo-audio', 'expo-video']);
 
 const windowDim = Dimensions.get('window');
@@ -68,15 +72,15 @@ export default function GlobalPlayer() {
   const navigation = useNavigation();
   const videoViewRef = useRef(null); 
   const syncAudioRef = useRef(null); 
-  
+
   const currentVideoIdRef = useRef(null);
   const fetchIdRef = useRef(0);
-  
+
   const scale = useRef(new Animated.Value(1)).current;
   const baseScaleRef = useRef(1);
   const initialDistanceRef = useRef(null);
   const isZoomingRef = useRef(false);
-  
+
   const lastTapRef = useRef({ time: 0, side: '' });
   const tapTimeoutRef = useRef(null);
   const isSlidingRef = useRef(false); 
@@ -86,7 +90,7 @@ export default function GlobalPlayer() {
   const [videoData, setVideoData] = useState(null);
   const [streamUrl, setStreamUrl] = useState(null);
   const [lowStreamUrl, setLowStreamUrl] = useState(null);
-  
+
   const [videoSource, setVideoSource] = useState(null); 
   const resumeTimeRef = useRef(0); 
 
@@ -101,16 +105,16 @@ export default function GlobalPlayer() {
 
   const [showControls, setShowControls] = useState(true);
   const controlsTimeoutRef = useRef(null);
-  
+
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
-  
+
   const [showAiMenu, setShowAiMenu] = useState(false);
   const [showAiTimeMenu, setShowAiTimeMenu] = useState(false);
 
   const [currentSpeed, setCurrentSpeed] = useState(1.0);
   const [scanInterval, setScanInterval] = useState(3.0);
-  
+
   const [blurTarget, setBlurTarget] = useState('w'); 
   const [aiScanEnabled, setAiScanEnabled] = useState(false);
 
@@ -123,7 +127,7 @@ export default function GlobalPlayer() {
   const isAudioModeRef = useRef(false);
   const streamModeRef = useRef('combined');
   const cachedAudioUrlRef = useRef(null); 
-  
+
   const isSyncingRef = useRef(false);
   const pendingSeekRef = useRef(null); 
 
@@ -174,7 +178,6 @@ export default function GlobalPlayer() {
       return () => { targetSub.remove(); scanSub.remove(); };
   }, []);
 
-  // 🚨 [FIX] - doNotMix সেটিং লক স্ক্রিন মিডিয়া ইন্টিগ্রেশনের জন্য বাধ্যতামূলক
   useEffect(() => {
     const setupAudio = async () => {
       try {
@@ -183,8 +186,8 @@ export default function GlobalPlayer() {
           playsInSilentModeIOS: true,
           shouldDuckAndroid: true,
           playThroughEarpieceAndroid: false,
-          interruptionModeIOS: 'doNotMix', // 👈 [IMPORTANT FOR LOCKSCREEN]
-          interruptionModeAndroid: 'doNotMix', // 👈 [IMPORTANT FOR LOCKSCREEN]
+          interruptionModeIOS: 'doNotMix', 
+          interruptionModeAndroid: 'doNotMix', 
         });
       } catch (e) {
           console.log("Audio Setup Error:", e);
@@ -196,7 +199,7 @@ export default function GlobalPlayer() {
   const safeReleaseAudio = () => {
       if (syncAudioRef.current) {
           try { 
-              syncAudioRef.current.clearLockScreenControls(); // 👈 লক স্ক্রিন থেকে রিমুভ
+              syncAudioRef.current.clearLockScreenControls(); 
               syncAudioRef.current.release(); 
           } catch(e) {}
           syncAudioRef.current = null;
@@ -235,7 +238,7 @@ export default function GlobalPlayer() {
       if (!e.data.state) return;
       const routes = e.data.state.routes;
       const currentRoute = routes[routes.length - 1].name;
-      
+
       if (currentRoute !== 'Player' && currentRoute !== 'PlayerScreen') {
           setPlayerState((prev) => {
               if (prev === 'full' || prev === 'center' || prev === 'fullscreen') {
@@ -303,7 +306,7 @@ export default function GlobalPlayer() {
   const seekTo = async (newTime) => {
       setCurrentTime(newTime); 
       targetScanSecRef.current = parseFloat(newTime.toFixed(1));
-      
+
       if (aiScanEnabledRef.current) startAiPipe(targetScanSecRef.current);
 
       try {
@@ -316,7 +319,6 @@ export default function GlobalPlayer() {
       } catch (error) { }
   };
 
-  // 🚨 [NEW] - লক স্ক্রিন উইজেট আপডেট ট্রিগার সিস্টেম
   const updateLockScreenControls = (audioPlayer, title, channel, artworkUrl) => {
       if (!audioPlayer || !audioPlayer.setActiveForLockScreen) return;
       try {
@@ -325,7 +327,7 @@ export default function GlobalPlayer() {
               artist: channel || 'MyTube Stream',
               artwork: artworkUrl || `https://i.ytimg.com/vi/${currentVideoIdRef.current}/hqdefault.jpg`
           }, {
-              showPlayPauseControls: true, // 👈 নোটিফিকেশনে প্লে পজ থাকবে
+              showPlayPauseControls: true,
               showSkipForwardBackwardControls: false,
               showNextPreviousControls: false
           });
@@ -363,10 +365,10 @@ export default function GlobalPlayer() {
       currentVideoIdRef.current = data.videoId;
       setVideoData(data.videoData);
       setPlayerState('full');
-      
+
       setStreamUrl(null); setVideoSource(null); setLowStreamUrl(null); lowStreamUrlRef.current = null; resumeTimeRef.current = 0; 
       setFallbackData(null); setIsAudioMode(false); isAudioModeRef.current = false; cachedAudioUrlRef.current = null; pendingSeekRef.current = null;
-      
+
       aiDataMapRef.current = {}; targetScanSecRef.current = 0; isAiProcessingRef.current = false; setFrameList([]); 
       setIsBlurredUI(false); isBlurredRef.current = false; setCurrentTime(0); setBuffered(0);
       scale.setValue(1); baseScaleRef.current = 1; triggerControls(); safeReleaseAudio();
@@ -390,14 +392,15 @@ export default function GlobalPlayer() {
           } else {
               let audioUrlToPlay = cachedAudioUrlRef.current;
               if (!audioUrlToPlay) {
+                  // 🚨 [UPDATED] Native Module কল করে অডিও বের করা
                   try {
-                      const res = await fetch(`${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&action=play&type=audio`);
-                      const json = await res.json();
-                      if (json.success && (json.audioUrl || json.url)) {
+                      const rawJsonString = await NativeModules.YtDlpModule.extractVideoInfo(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`);
+                      const json = processExtractedData(rawJsonString, 'play', 720);
+                      if (json && (json.audioUrl || json.url)) {
                           audioUrlToPlay = json.audioUrl || json.url;
                           cachedAudioUrlRef.current = audioUrlToPlay; 
                       }
-                  } catch (e) {}
+                  } catch (e) { console.error("Audio Mode Error:", e); }
               }
               if (audioUrlToPlay) {
                   safeReleaseAudio();
@@ -405,8 +408,7 @@ export default function GlobalPlayer() {
                   pendingSeekRef.current = resumeTimeRef.current; 
                   safeSetRate(syncAudioRef.current, currentSpeed); 
                   syncAudioRef.current.play();
-                  
-                  // 🚨 নোটিফিকেশন বার রেজিস্টার করা হলো
+
                   updateLockScreenControls(syncAudioRef.current, videoData?.title, videoData?.channel, videoData?.thumbnail);
               }
           }
@@ -417,7 +419,7 @@ export default function GlobalPlayer() {
               if (streamModeRef.current !== 'separate') safeReleaseAudio();
               else {
                   syncAudioRef.current.pause();
-                  syncAudioRef.current.clearLockScreenControls(); // 👈 মোড পরিবর্তন হলে ওল্ড লকস্ক্রিন ক্লিয়ার
+                  syncAudioRef.current.clearLockScreenControls(); 
               }
           }
           resumeTimeRef.current = resumeVideoTime;
@@ -444,6 +446,7 @@ export default function GlobalPlayer() {
       return () => clearTimeout(timeoutId);
   }, [videoSource, isAudioMode]);
 
+  // 🚨 [UPDATED] নেটিভ ইঞ্জিন কল করার জন্য fetchStreamUrl
   const fetchStreamUrl = async (vidId, targetQuality, fetchId) => {
     try {
       const qStr = targetQuality.toString().toUpperCase();
@@ -452,37 +455,39 @@ export default function GlobalPlayer() {
       else if (qStr.includes('4K') || qStr.includes('2160')) reqQ = 2160;
       else if (qStr.includes('2K') || qStr.includes('1440')) reqQ = 1440;
       else reqQ = parseInt(qStr.replace(/\D/g, '')) || 720;
+
+      const targetUrl = `https://www.youtube.com/watch?v=${vidId}`;
+
+      // 🚨 নেটিভ ইঞ্জিন থেকে ডেটা আনা
+      const rawJsonString = await NativeModules.YtDlpModule.extractVideoInfo(targetUrl);
       
-      const res = await fetch(`${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${vidId}`)}&quality=${reqQ}&action=play`);
-      const json = await res.json();
+      // 🚨 VideoProcessor দিয়ে প্লেয়ারের উপযোগী করা
+      const json = processExtractedData(rawJsonString, 'play', reqQ);
 
       if (fetchId !== fetchIdRef.current) return;
 
-      if (json.success && json.url) {
+      if (json && json.url) {
+          // AI Frame এর জন্য যদি lowQualityUrl দরকার হয়, সেটা এখানে সেভ হবে (ভবিষ্যতের জন্য)
           if (json.lowQualityUrl) {
-              setLowStreamUrl(json.lowQualityUrl); 
+              setLowStreamUrl(json.lowQualityUrl);
               lowStreamUrlRef.current = json.lowQualityUrl;
               if (aiScanEnabledRef.current) startAiPipe(0);
           }
-          
-          const resQ = parseInt(json.quality) || 720;
-          if (reqQ > resQ) {
-              setFallbackData({ reqQ, resQ, data: json, message: `Requested ${reqQ}p is not available. Play ${resQ}p instead?` });
-              return;
-          }
           startPlayback(json);
       }
-    } catch(e) {}
+    } catch(e) {
+        console.error("Player Stream Error:", e);
+    }
   };
 
   const startPlayback = async (json) => {
     setStreamMode(json.streamType || 'combined');
     streamModeRef.current = json.streamType || 'combined';
     cachedAudioUrlRef.current = json.audioUrl || null; 
-    
+
     setStreamUrl(json.url);
     setVideoSource(json.url); 
-    
+
     if (json.audioUrl && streamModeRef.current === 'separate') {
         safeReleaseAudio();
         syncAudioRef.current = createAudioPlayer(json.audioUrl);
@@ -511,23 +516,23 @@ export default function GlobalPlayer() {
               for (let i = 0; i < faces.length; i++) {
                   const face = faces[i];
                   const box = face.frame || face.bounds || {}; 
-                  
+
                   let padding = 20; 
                   let faceWidth = box.width ?? 0;
                   let faceHeight = box.height ?? 0;
 
                   let originX = Math.floor(Math.max(0, (box.left ?? box.x ?? box.originX ?? 0) - padding));
                   let originY = Math.floor(Math.max(0, (box.top ?? box.y ?? box.originY ?? 0) - padding));
-                  
+
                   let width = Math.floor(Math.max(10, faceWidth + padding * 2));
                   let height = Math.floor(Math.max(10, faceHeight + padding * 2)); 
-                  
+
                   const croppedFace = await ImageManipulator.manipulateAsync(
                       uri, 
                       [{ crop: { originX, originY, width, height } }, { resize: { width: 224, height: 224 } }], 
                       { compress: 1, format: ImageManipulator.SaveFormat.JPEG }
                   );
-                  
+
                   await loadGenderModelAsync();
                   const base64Data = await FileSystem.readAsStringAsync(croppedFace.uri, { encoding: FileSystem.EncodingType.Base64 });
                   const rawBuffer = new Uint8Array(decode(base64Data));
@@ -544,7 +549,7 @@ export default function GlobalPlayer() {
                   }
 
                   const output = await genderModelRef.current.run([pureInputBuffer]);
-                  
+
                   if (output && output.length > 0) {
                       const outArray = new Float32Array(output[0]);
                       if (outArray.length > 1) {
@@ -601,15 +606,15 @@ export default function GlobalPlayer() {
                   if (data.success && data.frameUrl) {
                       const tempLocalPath = `${FileSystem.cacheDirectory}temp_frame_${targetSec}.jpg`;
                       await FileSystem.downloadAsync(data.frameUrl, tempLocalPath);
-                      
+
                       const result = await processFrameForGender(tempLocalPath);
                       aiDataMapRef.current[targetSec] = { gender: result, size: 0 };
-                      
+
                       setFrameList(prev => {
                           const updated = [...prev, { time: targetSec, url: data.frameUrl, gender: result }];
                           return updated.sort((a, b) => a.time - b.time);
                       });
-                      
+
                       await FileSystem.deleteAsync(tempLocalPath, { idempotent: true });
                       targetScanSecRef.current = parseFloat((targetSec + scanIntervalRef.current).toFixed(1));
                   } else if (data.status === 'processing') {
@@ -633,10 +638,10 @@ export default function GlobalPlayer() {
   const handleSkip = async (amount, isSilent = false) => {
       let currentPosition = isAudioMode ? currentTime : (player ? player.currentTime : currentTime);
       let newTime = currentPosition + amount;
-      
+
       if (newTime < 0) newTime = 0;
       if (newTime > duration) newTime = duration;
-      
+
       await seekTo(newTime);
       if (!isSilent) triggerControls(); 
   };
@@ -644,7 +649,7 @@ export default function GlobalPlayer() {
   const handleTap = (side) => {
       const now = Date.now();
       const DOUBLE_TAP_DELAY = 300; 
-      
+
       if (lastTapRef.current.side === side && (now - lastTapRef.current.time) < DOUBLE_TAP_DELAY) {
           clearTimeout(tapTimeoutRef.current);
           lastTapRef.current = { time: 0, side: '' }; 
@@ -675,7 +680,6 @@ export default function GlobalPlayer() {
         if (isSyncingRef.current) return; 
 
         if (isAudioMode) {
-            // 🚨 অডিও মোডে থাকাকালীন ইউজার লকস্ক্রিন থেকে প্লে/পজ করলে তা UI-তে সিঙ্ক করবে
             if (syncAudioRef.current) {
                 setIsPlayingUI(syncAudioRef.current.playing || false);
                 setCurrentTime(syncAudioRef.current.currentTime);
@@ -683,7 +687,7 @@ export default function GlobalPlayer() {
             }
         } else {
             setIsPlayingUI(player?.playing || false);
-            
+
             if (player) {
                 if (!isSlidingRef.current && (player.currentTime > 0 || player.playing)) {
                     setCurrentTime(player.currentTime);
@@ -703,7 +707,7 @@ export default function GlobalPlayer() {
                         if (keys[i] <= player.currentTime) activeKey = keys[i];
                         else break;
                     }
-                    
+
                     const blockData = aiDataMapRef.current[activeKey];
                     const target = blurTargetRef.current;
                     const needBlur = blockData && (blockData.gender === target || blockData.gender === 'b');
@@ -831,10 +835,10 @@ export default function GlobalPlayer() {
         {...(!isInteractiveFull ? miniPanResponder.panHandlers : {})}
     >
       <View style={styles.videoWrapper}>
-        
+
         {streamUrl && !fallbackData && (
           <View style={{ flex: 1, width: '100%', height: '100%' }}>
-            
+
             <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
                 {videoSource ? (
                     <View style={{ flex: 1, width: '100%', height: '100%' }}>
@@ -842,7 +846,7 @@ export default function GlobalPlayer() {
                             key={videoSource} ref={videoViewRef} player={player} 
                             style={styles.video} contentFit="contain" nativeControls={false} 
                         />
-                        
+
                         {isBlurredUI && (
                             <View style={[StyleSheet.absoluteFillObject, { zIndex: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }]}>
                                 <Image 
@@ -879,7 +883,7 @@ export default function GlobalPlayer() {
 
         {isInteractiveFull && showControls && !fallbackData && (
           <View style={styles.controls} pointerEvents="box-none">
-             
+
              <View style={styles.centerRow} pointerEvents="box-none">
                 <TouchableOpacity onPress={async () => {
                     if (isAudioMode) {
@@ -903,7 +907,7 @@ export default function GlobalPlayer() {
              </View>
 
              <View style={styles.bottomBarWrapper} pointerEvents="box-none">
-                
+
                 {frameList.length > 0 && aiScanEnabled && (
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.storyboardContainer} contentContainerStyle={{ paddingHorizontal: 15 }}>
                         {frameList.map((frame, index) => (
@@ -922,7 +926,7 @@ export default function GlobalPlayer() {
 
                 <View style={styles.bottomBar}>
                     <Text style={styles.timeTextLeft}>{formatTime(currentTime)}</Text>
-                    
+
                     <View style={styles.sliderWrapper}>
                         <View style={styles.customTrackContainer}>
                             <View style={[styles.bufferedBar, { width: bufferedWidth }]} />
@@ -1034,7 +1038,7 @@ export default function GlobalPlayer() {
             </TouchableOpacity>
           </View>
         )}
-        
+
         {!isInteractiveFull && (
             <TouchableOpacity activeOpacity={0.9} style={styles.miniTouchableArea} onPress={() => {
                 if (videoData) { navigation.navigate('Player', { videoId: currentVideoIdRef.current, videoData }); setPlayerState('full'); }
