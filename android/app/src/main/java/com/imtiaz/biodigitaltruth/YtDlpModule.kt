@@ -1,5 +1,6 @@
 package com.imtiaz.biodigitaltruth
 
+import android.app.Application
 import com.facebook.react.bridge.*
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
@@ -17,16 +18,24 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
     fun extractVideoInfo(videoUrl: String, promise: Promise) {
         GlobalScope.launch(Dispatchers.IO) {
             try {
+                // 🚨 জাস্ট-ইন-টাইম ইনিশিয়ালাইজেশন (সবচেয়ে সেফ পদ্ধতি)
+                try {
+                    val app = reactApplicationContext.applicationContext as Application
+                    YoutubeDL.getInstance().init(app)
+                } catch (e: Exception) {
+                    // ইঞ্জিন কোনো কারণে চালু হতে ব্যর্থ হলে, এখন আর সে চুপ করে ক্র্যাশ করবে না
+                    // সে সরাসরি আপনাকে আসল কারণটি দেখাবে!
+                    promise.reject("INIT_ERROR", "ইঞ্জিন চালু হতে ব্যর্থ হয়েছে: " + e.localizedMessage)
+                    return@launch
+                }
+
                 val request = YoutubeDLRequest(videoUrl)
                 request.addOption("-j") // JSON আউটপুট
                 request.addOption("--no-warnings")
                 request.addOption("--no-playlist")
                 request.addOption("--no-check-certificate")
                 
-                // 🚨 কমেন্ট নিয়ে আসার ম্যাজিক কমান্ড
                 request.addOption("--write-comments")
-                
-                // 🚨 একবারে ১০০টি কমেন্ট আনবে, যেন ইঞ্জিন স্লো না হয়
                 request.addOption("--extractor-args")
                 request.addOption("youtube:max_comments=100")
 
@@ -37,7 +46,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                     return@launch
                 }
 
-                // পুরো ডেটা (কমেন্টসহ) জাভাস্ক্রিপ্টে পাঠিয়ে দেওয়া হলো
+                // ডেটা সফলভাবে পেলে পাঠাবে
                 promise.resolve(response.out)
 
             } catch (e: Exception) {
