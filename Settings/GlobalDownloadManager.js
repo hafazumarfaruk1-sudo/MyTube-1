@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, SafeAreaView
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import * as FileSystem from 'expo-file-system'; // 🚨 নেটিভ ডাউনলোডার ইমপোর্ট
+import * as FileSystem from 'expo-file-system'; // 🚨 নেটিভ ডাউনলোডার ইমপোর্ট করা হলো
 
 import { useTheme } from '../ThemeContext';
 import { useLanguage } from '../LanguageContext';
@@ -32,7 +32,7 @@ export default function GlobalDownloadManager() {
     
     const pan = useRef(new Animated.ValueXY({ x: 20, y: SCREEN_HEIGHT - 150 })).current;
     
-    // 🚨 ব্যাকগ্রাউন্ড ডাউনলোড কন্ট্রোল করার জন্য Ref
+    // ব্যাকগ্রাউন্ড ডাউনলোড কন্ট্রোল করার জন্য Ref
     const activeDownloadsRef = useRef({}); 
     const lastProgressTimeRef = useRef({}); 
     const lastDownloadedBytesRef = useRef({});
@@ -50,7 +50,7 @@ export default function GlobalDownloadManager() {
             setIsScreenVisible(true); loadDownloads();
         });
 
-        // 🚨 নেটিভ ডাউনলোড সিগন্যাল রিসিভ করা হচ্ছে
+        // 🚨 নেটিভ ডাউনলোড সিগন্যাল রিসিভ করা হচ্ছে (সার্ভারের বদলে)
         const startDownloadEvent = DeviceEventEmitter.addListener('startNativeDownload', async (data) => {
             const fileExt = data.ext || 'mp4';
             const safeTitle = data.title.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30);
@@ -109,7 +109,7 @@ export default function GlobalDownloadManager() {
 
             try {
                 const { uri } = await downloadResumable.downloadAsync();
-                // 🚨 ডাউনলোড সফল!
+                // 🚨 ডাউনলোড সফল হলে সেভ করা হচ্ছে
                 setDownloads(prev => {
                     const newList = prev.map(item =>
                         item.id === data.id ? { ...item, progress: '100', isCompleted: true, localUri: uri, speed: 'Completed', eta: '' } : item
