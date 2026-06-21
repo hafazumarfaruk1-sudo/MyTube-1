@@ -17,10 +17,6 @@ import com.facebook.react.defaults.DefaultReactNativeHost
 import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ReactNativeHostWrapper
 
-// 🚨 YoutubeDL এবং FFmpeg ইমপোর্ট
-import com.yausername.youtubedl_android.YoutubeDL
-import com.yausername.ffmpeg.FFmpeg // 👈 FFmpeg ইমপোর্ট যুক্ত করা হয়েছে
-
 class MainApplication : Application(), ReactApplication {
 
   override val reactNativeHost: ReactNativeHost = ReactNativeHostWrapper(
@@ -28,7 +24,7 @@ class MainApplication : Application(), ReactApplication {
       object : DefaultReactNativeHost(this) {
         override fun getPackages(): List<ReactPackage> =
             PackageList(this).packages.apply {
-              // 🚨 আমাদের কাস্টম মডিউল প্যাকেজ এখানে যুক্ত করা হলো
+              // কাস্টম মডিউল প্যাকেজ
               add(YtDlpPackage())
             }
 
@@ -44,14 +40,8 @@ class MainApplication : Application(), ReactApplication {
   override fun onCreate() {
     super.onCreate()
     
-    // 🚨 yt-dlp এবং FFmpeg initialization (অ্যাপ চালুর সাথে সাথে ইঞ্জিন স্টার্ট)
-    try {
-        YoutubeDL.getInstance().init(this)
-        FFmpeg.getInstance().init(this) // 👈 FFmpeg এখানে চালু করা হলো
-        Log.d("YoutubeDL", "Initialized successfully")
-    } catch (e: Exception) {
-        Log.e("YoutubeDL", "Failed to initialize", e)
-    }
+    // 🚨 App Startup ফাস্ট করার জন্য ইঞ্জিন ইনিশিয়ালাইজেশন এখান থেকে মুছে ফেলা হয়েছে! 
+    // এটি এখন সরাসরি YtDlpModule থেকে ব্যাকগ্রাউন্ডে চালু হবে।
 
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())
