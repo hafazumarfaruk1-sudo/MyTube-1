@@ -1,9 +1,7 @@
 package com.imtiaz.biodigitaltruth
 
-import android.app.Application
 import com.facebook.react.bridge.*
 import com.yausername.youtubedl_android.YoutubeDL
-import com.yausername.ffmpeg.FFmpeg 
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -19,15 +17,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
     fun extractVideoInfo(videoUrl: String, promise: Promise) {
         GlobalScope.launch(Dispatchers.IO) {
             try {
-                try {
-                    val app = reactApplicationContext.applicationContext as Application
-                    YoutubeDL.getInstance().init(app)
-                    FFmpeg.getInstance().init(app) 
-                } catch (e: Exception) {
-                    promise.reject("INIT_ERROR", "ইঞ্জিন চালু হতে ব্যর্থ হয়েছে: " + e.localizedMessage)
-                    return@launch
-                }
-
+                // সরাসরি রিকোয়েস্ট কল করা হচ্ছে (অফিশিয়াল নিয়ম)
                 val request = YoutubeDLRequest(videoUrl)
                 request.addOption("-j") 
                 request.addOption("--no-warnings")
@@ -57,10 +47,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
     fun updateEngine(promise: Promise) {
         GlobalScope.launch(Dispatchers.IO) {
             try {
-                val app = reactApplicationContext.applicationContext as Application
-                YoutubeDL.getInstance().init(app)
-                
-                // 🚨 0.14.0 ভার্সনের জন্য সঠিক আপডেট কমান্ড (UpdateChannel রিমুভ করা হয়েছে)
+                val app = reactApplicationContext.applicationContext as android.app.Application
                 YoutubeDL.getInstance().updateYoutubeDL(app)
                 promise.resolve("UPDATED_SUCCESSFULLY")
             } catch (e: Exception) {
