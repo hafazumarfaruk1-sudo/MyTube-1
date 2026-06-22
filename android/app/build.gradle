@@ -180,7 +180,6 @@ dependencies {
         implementation jscFlavor
     }
 
-    // 🚨 [NEW] YouTube-DL Android Library (ইঞ্জিন যুক্ত করা হলো)
-    implementation 'com.github.yausername.youtubedl-android:library:0.14.0'
-    implementation 'com.github.yausername.youtubedl-android:ffmpeg:0.14.0'
-}
+    // 🚨 লেটেস্ট ইঞ্জিন (Python 3.11 সহ)
+    implementation 'com.github.yausername.youtubedl-android:library:0.18.1'
+    implementation 'com.github.yausername.youtubedl-android:ffmpeg:0.18.1'
