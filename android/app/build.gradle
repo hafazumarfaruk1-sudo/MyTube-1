@@ -113,7 +113,6 @@ dependencies {
         implementation jscFlavor
     }
 
-    // 🚨 লেটেস্ট ইঞ্জিন (Python 3.11 সহ)
-    implementation 'com.github.yausername.youtubedl-android:library:0.18.1'
-    implementation 'com.github.yausername.youtubedl-android:ffmpeg:0.18.1'
-}
+    // 🚨 সঠিক অফিশিয়াল প্যাকেজের নাম
+implementation 'io.github.junkfood02.youtubedl-android:library:0.18.1'
+implementation 'io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1'
