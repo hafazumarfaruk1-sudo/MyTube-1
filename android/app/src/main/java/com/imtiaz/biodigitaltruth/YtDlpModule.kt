@@ -17,7 +17,6 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
     fun extractVideoInfo(videoUrl: String, promise: Promise) {
         GlobalScope.launch(Dispatchers.IO) {
             try {
-                // সরাসরি রিকোয়েস্ট কল করা হচ্ছে (অফিশিয়াল নিয়ম)
                 val request = YoutubeDLRequest(videoUrl)
                 request.addOption("-j") 
                 request.addOption("--no-warnings")
@@ -48,7 +47,8 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         GlobalScope.launch(Dispatchers.IO) {
             try {
                 val app = reactApplicationContext.applicationContext as android.app.Application
-                YoutubeDL.getInstance().updateYoutubeDL(app)
+                // 🚨 নতুন ভার্সন (0.18.1)-এর জন্য সঠিক আপডেট কমান্ড
+                YoutubeDL.getInstance().updateYoutubeDL(app, YoutubeDL.UpdateChannel.STABLE)
                 promise.resolve("UPDATED_SUCCESSFULLY")
             } catch (e: Exception) {
                 promise.reject("UPDATE_ERROR", e.message)
