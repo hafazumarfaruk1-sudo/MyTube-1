@@ -2,6 +2,7 @@ package com.imtiaz.biodigitaltruth
 
 import android.app.Application
 import android.content.res.Configuration
+import android.util.Log
 
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
@@ -15,6 +16,10 @@ import com.facebook.react.defaults.DefaultReactNativeHost
 
 import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ReactNativeHostWrapper
+
+// 🚨 YoutubeDL এবং FFmpeg ইমপোর্ট
+import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.ffmpeg.FFmpeg
 
 class MainApplication : Application(), ReactApplication {
 
@@ -38,6 +43,15 @@ class MainApplication : Application(), ReactApplication {
   override fun onCreate() {
     super.onCreate()
     
+    // 🚨 [OFFICIAL STANDARD] অফিশিয়াল ডকুমেন্টেশন অনুযায়ী মেইন থ্রেডে ইনিশিয়ালাইজেশন
+    try {
+        YoutubeDL.getInstance().init(this)
+        FFmpeg.getInstance().init(this)
+        Log.d("YoutubeDL", "Initialized successfully according to official docs")
+    } catch (e: Exception) {
+        Log.e("YoutubeDL", "Failed to initialize", e)
+    }
+
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())
     } catch (e: IllegalArgumentException) {
