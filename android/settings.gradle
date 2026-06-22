@@ -6,7 +6,7 @@ pluginManagement {
     }.standardOutput.asText.get().trim()
   ).getParentFile().absolutePath
   includeBuild(reactNativeGradlePlugin)
-  
+
   def expoPluginsPath = new File(
     providers.exec {
       workingDir(rootDir)
@@ -20,6 +20,17 @@ pluginManagement {
 plugins {
   id("com.facebook.react.settings")
   id("expo-autolinking-settings")
+}
+
+// 🚨 [FIX] নতুন গ্র্যাডলের জন্য রিপোজিটরি কনফিগারেশন এবং JitPack যুক্ত করা হয়েছে 🚨
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        google()
+        mavenCentral()
+        // ইউটিউব ইঞ্জিনের (youtubedl-android) জন্য JitPack রিপোজিটরি
+        maven { url 'https://www.jitpack.io' }
+    }
 }
 
 extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
