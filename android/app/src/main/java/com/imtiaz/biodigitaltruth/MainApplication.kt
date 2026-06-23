@@ -17,9 +17,14 @@ import com.facebook.react.defaults.DefaultReactNativeHost
 import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ReactNativeHostWrapper
 
-// 🚨 YoutubeDL এবং FFmpeg ইমপোর্ট
+// YoutubeDL এবং FFmpeg ইমপোর্ট
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.ffmpeg.FFmpeg
+
+// 🚨 ব্যাকগ্রাউন্ড থ্রেড (Coroutine) এর জন্য ইমপোর্ট 🚨
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
 
 class MainApplication : Application(), ReactApplication {
 
@@ -28,7 +33,7 @@ class MainApplication : Application(), ReactApplication {
       object : DefaultReactNativeHost(this) {
         override fun getPackages(): List<ReactPackage> =
             PackageList(this).packages.apply {
-              add(YtDlpPackage())
+              add(YtDlpPackage()) // আপনার নেটিভ মডিউল
             }
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"
@@ -42,14 +47,16 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
-    
-    // 🚨 [OFFICIAL STANDARD] অফিশিয়াল ডকুমেন্টেশন অনুযায়ী মেইন থ্রেডে ইনিশিয়ালাইজেশন
-    try {
-        YoutubeDL.getInstance().init(this)
-        FFmpeg.getInstance().init(this)
-        Log.d("YoutubeDL", "Initialized successfully according to official docs")
-    } catch (e: Exception) {
-        Log.e("YoutubeDL", "Failed to initialize", e)
+
+    // 🚨 [FIX] মেইন থ্রেড (UI Thread) ব্লক না করে ব্যাকগ্রাউন্ডে ইঞ্জিন জাগ্রত করা হচ্ছে 🚨
+    GlobalScope.launch(Dispatchers.IO) {
+        try {
+            YoutubeDL.getInstance().init(this@MainApplication)
+            FFmpeg.getInstance().init(this@MainApplication)
+            Log.d("YoutubeDL", "============ 🧠 ENGINE AWAKENED OFF-MAIN THREAD ============")
+        } catch (e: Exception) {
+            Log.e("YoutubeDL", "Failed to initialize engine", e)
+        }
     }
 
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
