@@ -21,10 +21,9 @@ import expo.modules.ReactNativeHostWrapper
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.ffmpeg.FFmpeg
 
-// Coroutine-এর জন্য স্ট্রাকচার্ড কনকারেন্সি ইমপোর্ট
-import kotlinx.coroutines.CoroutineScope
+// 🚨 ব্যাকগ্রাউন্ড থ্রেড (Coroutine) এর জন্য ইমপোর্ট 🚨
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 
 class MainApplication : Application(), ReactApplication {
@@ -34,8 +33,7 @@ class MainApplication : Application(), ReactApplication {
       object : DefaultReactNativeHost(this) {
         override fun getPackages(): List<ReactPackage> =
             PackageList(this).packages.apply {
-              // আপনার কাস্টম নেটিভ মডিউল যুক্ত করা হলো
-              add(YtDlpPackage())
+              add(YtDlpPackage()) // আপনার নেটিভ মডিউল
             }
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"
@@ -47,20 +45,23 @@ class MainApplication : Application(), ReactApplication {
   override val reactHost: ReactHost
     get() = ReactNativeHostWrapper.createReactHost(applicationContext, reactNativeHost)
 
-  // অ্যাপ্লিকেশন লাইফসাইকেলের সাথে আবদ্ধ করার জন্য ডেডিকেটেড স্কোপ তৈরি
-  private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
   override fun onCreate() {
     super.onCreate()
 
-    // মেইন থ্রেড (UI Thread) অবরুদ্ধ না করে ব্যাকগ্রাউন্ড থ্রেডে ইঞ্জিন ইনিশিয়ালাইজেশন
-    applicationScope.launch {
+    // 🚨 অ্যাপ ওপেন হওয়ার সাথে সাথে ইঞ্জিনের বুট সিকোয়েন্স (পাওয়ার অন) এবং ডিটেইলড লগিং 🚨
+    GlobalScope.launch(Dispatchers.IO) {
+        println("============ 🔌 [ENGINE BOOT] Initiating Power-On Sequence... ============")
         try {
+            println("============ 📂 [ENGINE BOOT] Unzipping Python Environment... ============")
             YoutubeDL.getInstance().init(this@MainApplication)
+            
+            println("============ 📂 [ENGINE BOOT] Unzipping FFmpeg Binary... ============")
             FFmpeg.getInstance().init(this@MainApplication)
-            Log.d("YoutubeDL", "============ 🧠 ENGINE AWAKENED OFF-MAIN THREAD ============")
+            
+            println("============ 🧠 [ENGINE BOOT SUCCESS] Engine is fully AWAKE and READY! ============")
         } catch (e: Exception) {
-            Log.e("YoutubeDL", "Failed to initialize engine", e)
+            println("============ 💀 [ENGINE BOOT FATAL ERROR] Failed to initialize: ${e.message} ============")
+            e.printStackTrace()
         }
     }
 
