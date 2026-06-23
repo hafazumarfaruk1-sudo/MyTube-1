@@ -21,9 +21,10 @@ import expo.modules.ReactNativeHostWrapper
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.ffmpeg.FFmpeg
 
-// 🚨 ব্যাকগ্রাউন্ড থ্রেড (Coroutine) এর জন্য ইমপোর্ট 🚨
+// Coroutine-এর জন্য স্ট্রাকচার্ড কনকারেন্সি ইমপোর্ট
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 class MainApplication : Application(), ReactApplication {
@@ -33,7 +34,8 @@ class MainApplication : Application(), ReactApplication {
       object : DefaultReactNativeHost(this) {
         override fun getPackages(): List<ReactPackage> =
             PackageList(this).packages.apply {
-              add(YtDlpPackage()) // আপনার নেটিভ মডিউল
+              // আপনার কাস্টম নেটিভ মডিউল যুক্ত করা হলো
+              add(YtDlpPackage())
             }
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"
@@ -45,11 +47,14 @@ class MainApplication : Application(), ReactApplication {
   override val reactHost: ReactHost
     get() = ReactNativeHostWrapper.createReactHost(applicationContext, reactNativeHost)
 
+  // অ্যাপ্লিকেশন লাইফসাইকেলের সাথে আবদ্ধ করার জন্য ডেডিকেটেড স্কোপ তৈরি
+  private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
   override fun onCreate() {
     super.onCreate()
 
-    // 🚨 [FIX] মেইন থ্রেড (UI Thread) ব্লক না করে ব্যাকগ্রাউন্ডে ইঞ্জিন জাগ্রত করা হচ্ছে 🚨
-    GlobalScope.launch(Dispatchers.IO) {
+    // মেইন থ্রেড (UI Thread) অবরুদ্ধ না করে ব্যাকগ্রাউন্ড থ্রেডে ইঞ্জিন ইনিশিয়ালাইজেশন
+    applicationScope.launch {
         try {
             YoutubeDL.getInstance().init(this@MainApplication)
             FFmpeg.getInstance().init(this@MainApplication)
