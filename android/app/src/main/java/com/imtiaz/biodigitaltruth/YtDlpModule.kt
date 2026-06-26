@@ -15,16 +15,13 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         return "YtDlpModule"
     }
 
-    // 🚨 নেটিভ লেভেল থেকে জাভাস্ক্রিপ্ট টার্মিনালে লগ পাঠানোর গোপন ব্রিজ 🚨
     private fun sendLogToTerminal(message: String) {
         Log.d("YtDlpModule", message) 
         try {
             reactApplicationContext
                 .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
                 .emit("EngineLiveLog", message)
-        } catch (e: Exception) {
-            // JS রেডি না থাকলে লগ স্কিপ করবে
-        }
+        } catch (e: Exception) { }
     }
 
     @ReactMethod
@@ -39,24 +36,22 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 request.addOption("--no-warnings")
                 request.addOption("--no-playlist")
                 request.addOption("--no-check-certificate")
-                request.addOption("--write-comments")
                 
-                // 🚨 [FIX] সবগুলো extractor-args একসাথে সঠিক ফরম্যাটে জুড়ে দেওয়া হলো 🚨
-                request.addOption("--extractor-args", "youtube:player_client=android,web_embedded;formats=missing_pot;max_comments=100")
+                // 🚨 [FIX] ভিডিওর স্পিড ১ মিনিটে থেকে ১ সেকেন্ডে নামিয়ে আনার জন্য কমেন্ট লোডিং মুছে ফেলা হলো 🚨
+                // শুধুমাত্র জাভাস্ক্রিপ্ট চ্যালেঞ্জ বাইপাসের কমান্ডটি রাখা হলো
+                request.addOption("--extractor-args", "youtube:player_client=android,web_embedded;formats=missing_pot")
 
-                sendLogToTerminal("============ ⏳ [ENGINE PROCESSING] Options Added. Executing Command... ============")
+                sendLogToTerminal("============ ⏳ [ENGINE PROCESSING] Fast Extraction Started... ============")
 
                 val response = YoutubeDL.getInstance().execute(request, null, null)
 
-                sendLogToTerminal("============ ✅ [ENGINE SUCCESS] Data Extracted Successfully! ============")
+                sendLogToTerminal("============ ✅ [ENGINE SUCCESS] Data Extracted in Rocket Speed! ============")
 
                 if (response.out.isNullOrEmpty()) {
-                    sendLogToTerminal("============ ❌ [ENGINE ERROR] Output string is empty! ============")
                     promise.reject("EXTRACTION_ERROR", "No data received from yt-dlp")
                     return@launch
                 }
 
-                sendLogToTerminal("============ 📤 [ENGINE EXIT] Sending data to JS level... ============\n")
                 promise.resolve(response.out)
 
             } catch (e: Exception) {
@@ -73,10 +68,8 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
             try {
                 val app = reactApplicationContext.applicationContext as android.app.Application
                 YoutubeDL.getInstance().updateYoutubeDL(app, YoutubeDL.UpdateChannel.STABLE)
-                sendLogToTerminal("============ ✅ [ENGINE UPDATE SUCCESS] Engine is now up to date! ============\n")
                 promise.resolve("UPDATED_SUCCESSFULLY")
             } catch (e: Exception) {
-                sendLogToTerminal("============ ❌ [ENGINE UPDATE FAILED] Error: ${e.message} ============\n")
                 promise.reject("UPDATE_ERROR", e.message)
             }
         }
