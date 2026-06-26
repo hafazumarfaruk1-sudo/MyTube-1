@@ -40,14 +40,12 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 request.addOption("--no-playlist")
                 request.addOption("--no-check-certificate")
                 request.addOption("--write-comments")
-                request.addOption("--extractor-args")
-                request.addOption("youtube:max_comments=100")
-                request.addOption("--extractor-args")
-                request.addOption("youtube:player_client=android,web_embedded;formats=missing_pot")
+                
+                // 🚨 [FIX] সবগুলো extractor-args একসাথে সঠিক ফরম্যাটে জুড়ে দেওয়া হলো 🚨
+                request.addOption("--extractor-args", "youtube:player_client=android,web_embedded;formats=missing_pot;max_comments=100")
 
                 sendLogToTerminal("============ ⏳ [ENGINE PROCESSING] Options Added. Executing Command... ============")
 
-                // 🚨 [FIX] ভুল কলব্যাকটি মুছে ফেলা হলো, এটি এখন কোনো কম্পাইল এরর দেবে না 🚨
                 val response = YoutubeDL.getInstance().execute(request, null, null)
 
                 sendLogToTerminal("============ ✅ [ENGINE SUCCESS] Data Extracted Successfully! ============")
