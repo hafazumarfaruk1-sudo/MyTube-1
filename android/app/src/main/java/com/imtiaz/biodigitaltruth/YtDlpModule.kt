@@ -24,23 +24,25 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         } catch (e: Exception) { }
     }
 
-    // =========================================================================
-    // 🚀 ১. রকেট স্পিড ভিডিও প্লেয়ার (মাত্র ১-২ সেকেন্ডে প্লে হবে)
-    // =========================================================================
+    // 🚨 অপশনগুলো এখন আর হার্ডকোড করা নেই, JS থেকে আসবে 🚨
     @ReactMethod
-    fun extractFastVideoInfo(videoUrl: String, promise: Promise) {
+    fun extractFastVideoInfo(videoUrl: String, options: ReadableMap, promise: Promise) {
         GlobalScope.launch(Dispatchers.IO) {
-            sendLogToTerminal("\n============ 🟢 [FAST PLAYBACK] Fetching Stream URLs Only ============")
+            sendLogToTerminal("\n============ 🟢 [DYNAMIC ENGINE] Fast Extraction Started ============")
             try {
                 val request = YoutubeDLRequest(videoUrl)
-                request.addOption("-j") 
-                request.addOption("--no-warnings")
-                request.addOption("--no-playlist")
-                request.addOption("--no-check-certificate")
-                request.addOption("--force-ipv4") // নেটওয়ার্ক টাইমআউট বন্ধ করতে
                 
-                // কমেন্ট ছাড়া শুধু ক্লায়েন্ট বাইপাস
-                request.addOption("--extractor-args", "youtube:player_client=android,web_embedded;formats=missing_pot")
+                // JS থেকে আসা ডাইনামিক কমান্ডগুলো পড়া হচ্ছে
+                val iterator = options.keySetIterator()
+                while (iterator.hasNextKey()) {
+                    val key = iterator.nextKey()
+                    val value = options.getString(key)
+                    if (value.isNullOrEmpty() || value == "null") {
+                        request.addOption(key)
+                    } else {
+                        request.addOption(key, value)
+                    }
+                }
 
                 val response = YoutubeDL.getInstance().execute(request, null, null)
                 
@@ -48,7 +50,6 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                     promise.reject("EXTRACTION_ERROR", "No data received")
                     return@launch
                 }
-                sendLogToTerminal("============ ✅ [FAST PLAYBACK] Success! Ready to play! ============")
                 promise.resolve(response.out)
             } catch (e: Exception) {
                 promise.reject("YT_DLP_ERROR", e.message)
@@ -56,31 +57,6 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         }
     }
 
-    // =========================================================================
-    // 💬 ২. অন-ডিমান্ড কমেন্ট ফেচার (শুধু যখন ইউজার চাইবে তখন লোড হবে)
-    // =========================================================================
-    @ReactMethod
-    fun fetchCommentsOnly(videoUrl: String, promise: Promise) {
-        GlobalScope.launch(Dispatchers.IO) {
-            sendLogToTerminal("\n============ 💬 [COMMENTS] Fetching Comments in Background ============")
-            try {
-                val request = YoutubeDLRequest(videoUrl)
-                request.addOption("-j") 
-                request.addOption("--write-comments")
-                request.addOption("--extractor-args", "youtube:max_comments=100")
-                request.addOption("--skip-download") // ভিডিও ফরম্যাট স্কিপ করবে, শুধু কমেন্ট আনবে
-
-                val response = YoutubeDL.getInstance().execute(request, null, null)
-                promise.resolve(response.out)
-            } catch (e: Exception) {
-                promise.reject("COMMENT_ERROR", e.message)
-            }
-        }
-    }
-
-    // =========================================================================
-    // 🔄 ইঞ্জিন আপডেটার
-    // =========================================================================
     @ReactMethod
     fun updateEngine(promise: Promise) {
         GlobalScope.launch(Dispatchers.IO) {
