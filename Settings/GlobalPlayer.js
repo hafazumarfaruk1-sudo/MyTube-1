@@ -18,7 +18,6 @@ import { Asset } from 'expo-asset';
 import FaceDetection from '@react-native-ml-kit/face-detection';
 import { loadTensorflowModel } from 'react-native-fast-tflite';
 
-// লজিক প্রসেসর যুক্ত করা হয়েছে
 import { processExtractedData } from '../VideoProcessor';
 
 LogBox.ignoreLogs(['Video component', 'expo-audio', 'expo-video']);
@@ -137,6 +136,17 @@ export default function GlobalPlayer() {
   const [isBlurredUI, setIsBlurredUI] = useState(false);
   const isBlurredRef = useRef(false);
 
+  // 🚨 নেটিভ ইঞ্জিনের জন্য কমন ডাইনামিক অপশনস 🚨
+  // ভবিষ্যতে কোনো কমান্ড পাল্টানোর দরকার হলে শুধু এই অবজেক্টটি পরিবর্তন করলেই হবে, নতুন বিল্ড লাগবে না!
+  const getEngineOptions = () => ({
+      "-j": "",
+      "--no-warnings": "",
+      "--no-playlist": "",
+      "--no-check-certificate": "",
+      "--force-ipv4": "", // নেটওয়ার্ক টাইমআউট বাইপাস
+      "--extractor-args": "youtube:player_client=android,web_embedded;formats=missing_pot"
+  });
+
   useEffect(() => {
       const loadAiSettings = async () => {
           try {
@@ -170,7 +180,12 @@ export default function GlobalPlayer() {
           }
       });
 
-      return () => { targetSub.remove(); scanSub.remove(); };
+      // লাইভ ইঞ্জিন লগের জন্য লিসেনার (টার্মিনালে দেখার জন্য)
+      const engineLogSub = DeviceEventEmitter.addListener('EngineLiveLog', (message) => {
+          console.log(message);
+      });
+
+      return () => { targetSub.remove(); scanSub.remove(); engineLogSub.remove(); };
   }, []);
 
   useEffect(() => {
@@ -377,28 +392,18 @@ export default function GlobalPlayer() {
               let audioUrlToPlay = cachedAudioUrlRef.current;
               if (!audioUrlToPlay) {
                   try {
-                      console.log(`[DEBUG AUDIO MODE] Extracting audio for URL ID: ${currentVideoIdRef.current}`);
-                      const rawJsonString = await NativeModules.YtDlpModule.extractVideoInfo(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`);
+                      const targetUrl = `https://www.youtube.com/watch?v=${currentVideoIdRef.current}`;
+                      const engineOptions = getEngineOptions();
                       
-                      console.log("================ [DEBUG AUDIO MODE: RAW JSON FROM ENGINE] ================");
-                      console.log(rawJsonString);
-                      console.log("=========================================================================");
-
+                      // 🚨 ডাইনামিক অপশন দিয়ে কল করা হচ্ছে
+                      const rawJsonString = await NativeModules.YtDlpModule.extractFastVideoInfo(targetUrl, engineOptions);
                       const json = processExtractedData(rawJsonString, 'play', 720);
                       
-                      console.log("================ [DEBUG AUDIO MODE: PROCESSED DATA] ================");
-                      console.log(JSON.stringify(json, null, 2));
-                      console.log("====================================================================");
-
                       if (json && (json.audioUrl || json.url)) {
                           audioUrlToPlay = json.audioUrl || json.url;
                           cachedAudioUrlRef.current = audioUrlToPlay; 
                       }
-                  } catch (e) { 
-                      console.error("============== [DEBUG AUDIO MODE: EXTRACTION ERROR] ==============");
-                      console.error(e); 
-                      console.error("==================================================================");
-                  }
+                  } catch (e) { console.log(e); }
               }
               if (audioUrlToPlay) {
                   safeReleaseAudio();
@@ -446,7 +451,6 @@ export default function GlobalPlayer() {
 
   // 🚨 নেটিভ ইঞ্জিন থেকে প্লেয়ারের ভিডিও লিংক আনা হচ্ছে
   const fetchStreamUrl = async (vidId, targetQuality, fetchId) => {
-    console.log(`\n============ 🚀 [START fetchStreamUrl] ID: ${vidId} | Requested Quality: ${targetQuality} ============`);
     try {
       const qStr = targetQuality.toString().toUpperCase();
       let reqQ = 720;
@@ -456,24 +460,13 @@ export default function GlobalPlayer() {
       else reqQ = parseInt(qStr.replace(/\D/g, '')) || 720;
 
       const targetUrl = `https://www.youtube.com/watch?v=${vidId}`;
-      console.log(`[DEBUG] Requesting Native Module extractVideoInfo for URL: ${targetUrl}`);
+      const engineOptions = getEngineOptions();
 
-      // ১. নেটিভ ইঞ্জিন থেকে পাওয়া একদম কাঁচা স্ট্রিং সম্পূর্ণ প্রিন্ট করা
-      const rawJsonString = await NativeModules.YtDlpModule.extractVideoInfo(targetUrl);
-      console.log("\n================ 📦 [DEBUG 1: RAW JSON STRING FROM NATIVE ENGINE] ================");
-      console.log(rawJsonString);
-      console.log("==================================================================================\n");
-
-      // ২. ভিডিও প্রসেসর দ্বারা ফিল্টার করার পর কী তথ্য বের হলো তা সম্পূর্ণ প্রিন্ট করা
+      // 🚨 ডাইনামিক অপশন দিয়ে কল করা হচ্ছে
+      const rawJsonString = await NativeModules.YtDlpModule.extractFastVideoInfo(targetUrl, engineOptions);
       const json = processExtractedData(rawJsonString, 'play', reqQ);
-      console.log("================ 📋 [DEBUG 2: PROCESSED JSON OBJECT FOR PLAYER] ================");
-      console.log(JSON.stringify(json, null, 2));
-      console.log("================================================================================\n");
 
-      if (fetchId !== fetchIdRef.current) {
-          console.log(`[DEBUG WARNING] fetchId mismatch! Active ID: ${fetchIdRef.current}, current task ID: ${fetchId}. Aborting stream.`);
-          return;
-      }
+      if (fetchId !== fetchIdRef.current) return;
 
       if (json && json.url) {
           if (json.lowQualityUrl) {
@@ -481,37 +474,23 @@ export default function GlobalPlayer() {
               lowStreamUrlRef.current = json.lowQualityUrl;
           }
           startPlayback(json);
-      } else {
-          console.log("❌ [DEBUG ERROR] Extraction success but 'json.url' is null or undefined!");
       }
     } catch(e) {
-        console.error("\n================ ❌ [DEBUG 3: CRITICAL EXCEPTION IN fetchStreamUrl] ================");
-        console.error(e);
-        console.error("====================================================================================\n");
+        console.error("Player Stream Error:", e);
     }
   };
 
-  // ইউটিউব ইঞ্জিন আপডেট করার ফাংশন
   const updateYoutubeEngine = async () => {
       try {
           Alert.alert("আপডেট হচ্ছে...", "ইউটিউব ইঞ্জিন আপডেট হচ্ছে। দয়া করে কিছুক্ষণ অপেক্ষা করুন, ইন্টারনেট স্পিডের ওপর ভিত্তি করে ১-২ মিনিট সময় লাগতে পারে।");
-          console.log("[DEBUG] Native Module updateEngine triggered...");
-          const result = await NativeModules.YtDlpModule.updateEngine();
-          console.log(`[DEBUG] updateEngine result: ${result}`);
+          await NativeModules.YtDlpModule.updateEngine();
           Alert.alert("সফল!", "ইঞ্জিন সফলভাবে লেটেস্ট ভার্সনে আপডেট হয়েছে। এখন সব ভিডিও আবার আগের মতো কাজ করবে।");
       } catch (error) {
-          console.error("[DEBUG ERROR] Update Engine failed:", error);
           Alert.alert("Error", "আপডেট ফেইল হয়েছে: " + error.message);
       }
   };
 
   const startPlayback = async (json) => {
-    console.log("\n================ 🎥 [DEBUG 4: STARTING PLAYBACK WITH CONFIGURATION] ================");
-    console.log(`Stream Type: ${json.streamType || 'combined'}`);
-    console.log(`Video Source URL: ${json.url}`);
-    console.log(`Audio Source URL: ${json.audioUrl || 'N/A (Combined Stream)'}`);
-    console.log("====================================================================================\n");
-
     setStreamMode(json.streamType || 'combined');
     streamModeRef.current = json.streamType || 'combined';
     cachedAudioUrlRef.current = json.audioUrl || null; 
@@ -520,7 +499,6 @@ export default function GlobalPlayer() {
     setVideoSource(json.url); 
 
     if (json.audioUrl && streamModeRef.current === 'separate') {
-        console.log(`[DEBUG] Initializing secondary audio player for separate stream...`);
         safeReleaseAudio();
         syncAudioRef.current = createAudioPlayer(json.audioUrl);
         safeSetVolume(syncAudioRef.current, 1.0); 
