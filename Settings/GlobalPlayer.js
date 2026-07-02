@@ -136,15 +136,16 @@ export default function GlobalPlayer() {
   const [isBlurredUI, setIsBlurredUI] = useState(false);
   const isBlurredRef = useRef(false);
 
-  // 🚨 নেটিভ ইঞ্জিনের জন্য কমন ডাইনামিক অপশনস 🚨
-  // ভবিষ্যতে কোনো কমান্ড পাল্টানোর দরকার হলে শুধু এই অবজেক্টটি পরিবর্তন করলেই হবে, নতুন বিল্ড লাগবে না!
+  // 🚨 নেটিভ ইঞ্জিনের জন্য কমন ডাইনামিক অপশনস (Rocket Speed Config) 🚨
   const getEngineOptions = () => ({
       "-j": "",
       "--no-warnings": "",
       "--no-playlist": "",
       "--no-check-certificate": "",
-      "--force-ipv4": "", // নেটওয়ার্ক টাইমআউট বাইপাস
-      "--extractor-args": "youtube:player_client=android,web_embedded;formats=missing_pot"
+      "--force-ipv4": "", // IPv6 এর কারণে আটকে থাকা রোধ করতে
+      "--socket-timeout": "5", // ৫ সেকেন্ডের বেশি নেটওয়ার্কে অপেক্ষা করবে না
+      "--retries": "1", // বারবার ট্রাই করে সময় নষ্ট করবে না
+      "--extractor-args": "youtube:player_client=web,default;formats=missing_pot" // জাভাস্ক্রিপ্ট চ্যালেঞ্জ বাইপাস
   });
 
   useEffect(() => {
@@ -180,9 +181,9 @@ export default function GlobalPlayer() {
           }
       });
 
-      // লাইভ ইঞ্জিন লগের জন্য লিসেনার (টার্মিনালে দেখার জন্য)
+      // 🚨 নেটিভ কোটলিন ইঞ্জিন থেকে আসা লাইভ লগিং রিসিভার 🚨
       const engineLogSub = DeviceEventEmitter.addListener('EngineLiveLog', (message) => {
-          console.log(message);
+          console.log(`⚡ [NATIVE ENGINE LIVE] ${message}`);
       });
 
       return () => { targetSub.remove(); scanSub.remove(); engineLogSub.remove(); };
@@ -392,18 +393,19 @@ export default function GlobalPlayer() {
               let audioUrlToPlay = cachedAudioUrlRef.current;
               if (!audioUrlToPlay) {
                   try {
+                      console.log("\n============ 🎧 [JS LEVEL] Fetching Audio Stream ============");
                       const targetUrl = `https://www.youtube.com/watch?v=${currentVideoIdRef.current}`;
                       const engineOptions = getEngineOptions();
                       
-                      // 🚨 ডাইনামিক অপশন দিয়ে কল করা হচ্ছে
                       const rawJsonString = await NativeModules.YtDlpModule.extractFastVideoInfo(targetUrl, engineOptions);
                       const json = processExtractedData(rawJsonString, 'play', 720);
                       
                       if (json && (json.audioUrl || json.url)) {
                           audioUrlToPlay = json.audioUrl || json.url;
                           cachedAudioUrlRef.current = audioUrlToPlay; 
+                          console.log("✅ [JS LEVEL] Audio URL fetched successfully!");
                       }
-                  } catch (e) { console.log(e); }
+                  } catch (e) { console.error("❌ [JS LEVEL] Audio Fetch Error:", e); }
               }
               if (audioUrlToPlay) {
                   safeReleaseAudio();
@@ -449,8 +451,11 @@ export default function GlobalPlayer() {
       return () => clearTimeout(timeoutId);
   }, [videoSource, isAudioMode]);
 
-  // 🚨 নেটিভ ইঞ্জিন থেকে প্লেয়ারের ভিডিও লিংক আনা হচ্ছে
+  // ====================================================================
+  // 🚨 নেটিভ ইঞ্জিন থেকে প্লেয়ারের ভিডিও লিংক আনা এবং লাইভ লগিং
+  // ====================================================================
   const fetchStreamUrl = async (vidId, targetQuality, fetchId) => {
+    console.log(`\n============ 🚀 [JS LEVEL: START] Fetching Video ID: ${vidId} | Quality: ${targetQuality} ============`);
     try {
       const qStr = targetQuality.toString().toUpperCase();
       let reqQ = 720;
@@ -462,35 +467,59 @@ export default function GlobalPlayer() {
       const targetUrl = `https://www.youtube.com/watch?v=${vidId}`;
       const engineOptions = getEngineOptions();
 
+      console.log(`[JS LEVEL] Calling Native Module with Engine Options:`);
+      console.log(JSON.stringify(engineOptions, null, 2));
+
       // 🚨 ডাইনামিক অপশন দিয়ে কল করা হচ্ছে
       const rawJsonString = await NativeModules.YtDlpModule.extractFastVideoInfo(targetUrl, engineOptions);
+      
+      console.log("\n================ 📦 [JS LEVEL: RAW DATA (TRUNCATED)] ==================");
+      console.log(rawJsonString ? rawJsonString.substring(0, 300) + "\n...[TRUNCATED FOR TERMINAL HEALTH]" : "Empty Response");
+      console.log("=========================================================================\n");
+
       const json = processExtractedData(rawJsonString, 'play', reqQ);
 
-      if (fetchId !== fetchIdRef.current) return;
+      console.log("================ 📋 [JS LEVEL: PROCESSED FINAL DATA] ================");
+      console.log(JSON.stringify(json, null, 2));
+      console.log("======================================================================\n");
+
+      if (fetchId !== fetchIdRef.current) {
+          console.log("⚠️ [JS LEVEL] Fetch ID mismatch. Aborting stream set.");
+          return;
+      }
 
       if (json && json.url) {
+          console.log("✅ [JS LEVEL] Valid stream URLs generated! Sending to Player...");
           if (json.lowQualityUrl) {
               setLowStreamUrl(json.lowQualityUrl); 
               lowStreamUrlRef.current = json.lowQualityUrl;
           }
           startPlayback(json);
+      } else {
+          console.log("❌ [JS LEVEL: ERROR] Extracted 'url' is null. Extraction Failed.");
       }
     } catch(e) {
+        console.error("\n================ ❌ [JS LEVEL: CRITICAL EXCEPTION] ================");
         console.error("Player Stream Error:", e);
+        console.error("======================================================================\n");
     }
   };
 
   const updateYoutubeEngine = async () => {
       try {
           Alert.alert("আপডেট হচ্ছে...", "ইউটিউব ইঞ্জিন আপডেট হচ্ছে। দয়া করে কিছুক্ষণ অপেক্ষা করুন, ইন্টারনেট স্পিডের ওপর ভিত্তি করে ১-২ মিনিট সময় লাগতে পারে।");
+          console.log("\n============ 🔄 [JS LEVEL] Triggering Engine Update ============");
           await NativeModules.YtDlpModule.updateEngine();
+          console.log("✅ [JS LEVEL] Engine Updated Successfully!");
           Alert.alert("সফল!", "ইঞ্জিন সফলভাবে লেটেস্ট ভার্সনে আপডেট হয়েছে। এখন সব ভিডিও আবার আগের মতো কাজ করবে।");
       } catch (error) {
+          console.error("❌ [JS LEVEL] Update Failed:", error);
           Alert.alert("Error", "আপডেট ফেইল হয়েছে: " + error.message);
       }
   };
 
   const startPlayback = async (json) => {
+    console.log(`\n============ 🎥 [JS LEVEL: PLAYBACK INIT] Stream Type: ${json.streamType || 'combined'} ============`);
     setStreamMode(json.streamType || 'combined');
     streamModeRef.current = json.streamType || 'combined';
     cachedAudioUrlRef.current = json.audioUrl || null; 
@@ -499,6 +528,7 @@ export default function GlobalPlayer() {
     setVideoSource(json.url); 
 
     if (json.audioUrl && streamModeRef.current === 'separate') {
+        console.log("🔊 [JS LEVEL] Initializing Secondary Audio Player...");
         safeReleaseAudio();
         syncAudioRef.current = createAudioPlayer(json.audioUrl);
         safeSetVolume(syncAudioRef.current, 1.0); 
